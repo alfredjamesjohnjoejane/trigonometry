@@ -726,24 +726,31 @@ function isStandaloneMode(): boolean {
   );
 }
 
+function isAppInstalled(): boolean {
+  return ST.get('pwaInstalled') === '1';
+}
+
+function markAppInstalled(): void {
+  ST.set('pwaInstalled', '1');
+}
+
 function enforcePWAOverlay(): void {
   const overlay = document.getElementById('pwa-enforce-overlay');
   if (!overlay) return;
 
-  if (isStandaloneMode()) {
-    // Running as installed PWA — hide the enforcement overlay
+  // If running in standalone mode OR app was previously installed, hide overlay
+  if (isStandaloneMode() || isAppInstalled()) {
     overlay.style.display = 'none';
     return;
   }
 
-  // Not standalone — ensure overlay is visible (it's visible by default in HTML,
-  // but this handles cases where something else hid it)
+  // Not standalone and not previously installed — ensure overlay is visible
   overlay.style.display = 'flex';
 
   // Detect iOS
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const iosEl = document.getElementById('pwa-enforce-ios');
-  const installBtn = document.getElementById('pwa-enforce-install-btn') as HTMLButtonElement | null;
+  const installBtn = document.getElementById('pwa-enforce-install-btn') as HTMLAnchorElement | null;
 
   if (isIOS && iosEl) {
     iosEl.style.display = 'block';
@@ -752,27 +759,12 @@ function enforcePWAOverlay(): void {
     iosEl.style.display = 'none';
   }
 
-  // Try to trigger install prompt automatically
-  const prompt = getDeferredPrompt();
-  if (prompt && installBtn) {
-    installBtn.onclick = () => {
-      try {
-        (prompt as unknown as { prompt: () => void }).prompt();
-      } catch {
-        const errEl = document.getElementById('pwa-enforce-error');
-        if (errEl) {
-          errEl.textContent = 'Install failed. Use browser menu (⋮) → Install app.';
-          errEl.style.display = 'block';
-        }
-      }
-    };
-  }
-
   // === STRICT ENFORCEMENT LAYERS ===
 
   // Layer 1: MutationObserver — re-show overlay if anyone tries to hide/remove it
   const observer = new MutationObserver(_mutations => {
-    if (!isStandaloneMode()) {
+    // Only enforce if not standalone and not previously installed
+    if (!isStandaloneMode() && !isAppInstalled()) {
       // Check if overlay was hidden or removed
       const isHidden =
         overlay.style.display === 'none' ||
@@ -811,7 +803,7 @@ function enforcePWAOverlay(): void {
 
   // Layer 3: Resize listener — re-check standalone mode on resize
   window.addEventListener('resize', () => {
-    if (!isStandaloneMode()) {
+    if (!isStandaloneMode() && !isAppInstalled()) {
       overlay.style.display = 'flex';
       overlay.style.visibility = 'visible';
       overlay.style.opacity = '1';
@@ -822,7 +814,7 @@ function enforcePWAOverlay(): void {
 
   // Layer 4: Periodic check — catch any edge cases (tab restore, etc.)
   const interval = setInterval(() => {
-    if (!isStandaloneMode()) {
+    if (!isStandaloneMode() && !isAppInstalled()) {
       overlay.style.display = 'flex';
       overlay.style.visibility = 'visible';
       overlay.style.opacity = '1';
@@ -958,6 +950,8 @@ export {
   checkPWAInstallAvailability,
   enforcePWAOverlay,
   isStandaloneMode,
+  isAppInstalled,
+  markAppInstalled,
   updateOnlineStatus,
   setDeferredPrompt,
 };

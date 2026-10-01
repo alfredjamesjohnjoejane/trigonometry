@@ -17,6 +17,7 @@ import {
   startPlayTimer,
   checkGameStatus,
   setDeferredPrompt,
+  markAppInstalled,
 } from './ui/index.js';
 import { setupBlockedUrlGuards, scrubPortedLinks, showErrorToast } from './utils/index.js';
 
@@ -54,8 +55,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btn) btn.style.display = 'none';
     if (msg) msg.style.display = 'block';
     setDeferredPrompt(null);
+    markAppInstalled();
     showErrorToast('App installed!');
-    // Hide the enforcement overlay on next load
+    // Hide the enforcement overlay
     const overlay = document.getElementById('pwa-enforce-overlay');
     if (overlay) overlay.style.display = 'none';
   });
