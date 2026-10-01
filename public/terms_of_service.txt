@@ -1,0 +1,77 @@
+TERMS OF SERVICE
+---------------
+
+1. ACCEPTANCE
+These Terms of Service ("Agreement") are legally binding between you ("User") and the service operator ("Provider"). By accessing or using this website you agree to be bound by this Agreement. If you do not agree, do not access or use the site. This Agreement constitutes the entire understanding between the parties concerning the use of the service.
+
+2. ELIGIBILITY
+You must be at least 13 years old or have parental/guardian permission to use this service. Use of this site must comply with your local laws, your school's acceptable use policy, and these Terms. You may not use the service if you are a prohibited party under applicable laws or regulations.
+
+3. DESCRIPTION OF SERVICE
+3.1 The Provider operates a free website that serves as a user interface and access point for games hosted by third-party services. The Provider does not host, upload, store, or transmit any game code, graphics, audio, or other proprietary game assets on its own servers.
+3.2 The service is built using LuminoSDK, a third-party software development kit/framework, which provides the technical infrastructure for the website's operation, navigation, and toggleable features.
+3.3 The service provides links to games hosted by third-party services. The Provider assumes no responsibility for the availability, content, or legality of third-party games.
+3.4 The service is provided "as is" for educational and recreational use only. Availability of specific games or sections may change at any time without notice.
+3.5 The service includes a community URL sharing feature ("Marketplace"), described in Section 13, through which Users may anonymously submit, vote on, and report links to third-party websites.
+
+4. INTELLECTUAL PROPERTY AND COPYRIGHT
+4.1 All game content, including but not limited to images, audio, code and trademarks, remains the property of their respective owners. Reference to any game or trademark (including Nintendo Sony Microsoft or other third-party intellectual property) is for descriptive purposes only and does not imply sponsorship, affiliation, or endorsement.
+4.2 The Provider does not claim any ownership rights over games or materials hosted by third parties, including LuminoSDK. Users may not upload, distribute, or link to games that infringe or violate any third-party copyright or trademark.
+4.3 Users agree to abide by all applicable copyright law. The Provider reserves the right to terminate accounts of repeat copyright infringers in compliance with the Digital Millennium Copyright Act (DMCA) and other applicable law.
+4.4 By using the service, you represent and warrant that you will not upload, link to, or otherwise make available any content that you do not have the legal right to distribute.
+4.5 The Provider's use of LuminoSDK is subject to the LuminoSDK terms of service and license agreement, which the User acknowledges and accepts as separate from these Terms.
+
+5. USER CONDUCT
+You agree to use the service only for lawful purposes. Prohibited conduct includes:
+- Bypassing or attempting to bypass network security, firewalls, or filtering implemented by your school, employer, or network provider
+- Uploading or sharing content that infringes copyright, trademarks, or other intellectual property rights
+- Posting defamatory, obscene, threatening, or harassing material
+- Reverse engineering, decompiling, or modifying any games or software accessed through the service
+- Commercial use, resale, or redistribution of games or service content without explicit permission
+- Any use that violates your school's acceptable use policy or applicable law
+- Bypassing or attempting to bypass the toggleable section restrictions or the LuminoSDK technical limitations
+- Submitting links through the Marketplace that direct to adult or sexually explicit material, malware, phishing, unlawful content, or content that infringes intellectual property rights
+- Manipulating Marketplace votes, reports, or status signals, including through automated means
+
+6. PRIVACY
+This service is provided without collection of personal information. Users are not required to create accounts, and the Provider does not collect names, email addresses, or other personally identifiable information. Users should not share passwords, personal details, or sensitive information via the service or its comment/chat features.
+
+6.1 No personal information (name, email, or other PII) of any User shall be displayed, published, or made publicly visible on this website or within any service accessible through this platform. Users access and interact with the service using display nicknames or handles only. Any apparent "name" visible on the site is a display nickname chosen by the User, not their legal name.
+
+6.2 The Provider collects minimal data required for service operation (such as cached game progress and basic usage statistics) and does not track Users' real identities, legal names, or email addresses within the service interface.
+
+6.3 For community features, limited technical data (such as IP addresses) is processed for rate limiting and abuse prevention as described in Section 13.5. This data is not displayed publicly.
+
+7. SERVICE MODIFICATIONS
+The Provider reserves the right, at its sole discretion, to modify, suspend, discontinue, or terminate the service at any time, with or without notice. The Provider may also change the available games, toggleable sections, features, or access restrictions without liability. The Provider may modify or update the LuminoSDK integration at any time.
+
+8. LIMITATION OF LIABILITY
+8.1 The service is provided "as is" and "as available" without warranties of any kind, either express or implied, including but not limited to implied warranties of merchantability, fitness for a particular purpose, non-infringement, or accuracy.
+8.2 To the fullest extent permissible by applicable law, the Provider and its officers, directors, employees, and agents shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including but not limited to loss of data, loss of network access, disciplinary action by your school or employer, or any other commercial damages, even if advised of the possibility of such damages.
+8.3 The Provider's total aggregate liability arising out of or related to this Agreement shall not exceed $10.00 USD, regardless of the cause of action or theory of recovery.
+8.4 Some jurisdictions do not allow the exclusion of certain warranties or the limitation of liability. In such jurisdictions, the above limitations may not apply to you.
+
+9. INDEMNIFICATION
+You agree to indemnify, defend, and hold harmless the Provider, its officers, directors, employees, and agents from and against any and all claims, losses, liabilities, damages, costs, and expenses (including reasonable attorneys' fees) arising out of or related to: (a) your use of the service; (b) your violation of this Agreement; (c) your violation of any third-party right, including but not limited to intellectual property rights; or (d) any claim that your content caused injury or damage to a third party.
+
+10. TERMINATION
+10.1 The Provider may terminate or suspend your access to the service immediately, without prior notice or liability, for any reason or no reason, including but not limited to breach of this Agreement.
+10.2 Upon termination, your right to use the service ceases immediately. The Provider may also report any suspected illegal activity to law enforcement or school authorities.
+10.3 Sections 4 (Intellectual Property), 8 (Limitation of Liability), 9 (Indemnification), 10 (Termination), and 13 (Community URL Sharing) shall survive any termination or expiration of this Agreement.
+
+11. GOVERNING LAW AND JURISDICTION
+This Agreement shall be governed by and construed in accordance with the laws of the applicable jurisdiction, without regard to conflicts of law principles. Any legal action arising out of or relating to this Agreement shall be brought exclusively in the federal or state courts located in the Provider's jurisdiction. Both parties consent to personal jurisdiction in such courts. If any provision of this Agreement is found invalid or unenforceable, the remaining provisions shall remain in full force and effect.
+
+12. CONTACT INFORMATION
+There is no method of contacting the Provider regarding this Agreement. The service is provided as-is without direct communication channels.
+
+13. COMMUNITY URL SHARING (MARKETPLACE)
+13.1 The Marketplace allows Users to anonymously submit links to third-party websites and to vote on and report those links. All links, votes, scores, status labels, and reports in the Marketplace are user generated content. The Provider does not create, select, review, approve, or endorse any submitted link before it is displayed, and the display of a link does not constitute endorsement, verification, or a representation that the linked site is safe, lawful, or accurately described.
+13.2 By submitting a link, you represent and warrant that: (a) the link does not direct to adult or sexually explicit material, malware, phishing, or other harmful or unlawful content; (b) the link does not infringe any copyright, trademark, or other intellectual property or personal right; (c) the link does not facilitate wrongdoing or the violation of any law or policy applicable to you; and (d) you grant the Provider a worldwide, royalty-free, non-exclusive license to display, distribute, and categorize the submitted link in connection with the service.
+13.3 The Provider uses automated screening and community signals (including votes, scores, status labels, and reports) to organize the Marketplace. These measures are imperfect and are provided for convenience only. They do not guarantee that any link is safe, lawful, or correctly labeled, and they reflect community opinion rather than findings by the Provider. You access third-party links entirely at your own risk. You are solely responsible for determining whether accessing any linked site complies with your local laws and with the policies of your school, employer, or network provider.
+13.4 The Provider may, at its sole discretion and without notice or liability, remove any link, adjust or disregard any vote or report, restrict or disable submissions, votes, or reports, or limit access to the Marketplace, whether based on automated filters, community signals, manual review, or for any other reason. The Provider has no obligation to monitor the Marketplace or to remove any particular content.
+13.5 To support rate limiting, fraud prevention, and abuse prevention for submissions, votes, and reports, the service processes limited technical data such as IP addresses. This data is retained only as long as reasonably necessary for those purposes, is not displayed publicly, and is not used to establish accounts or profiles.
+
+---------
+
+Last updated: September 18 2026

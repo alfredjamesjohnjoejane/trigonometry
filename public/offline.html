@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Offline - jesherhead</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#e0e0e0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #111; color: #e0e0e0; font-family: 'Segoe UI', system-ui, sans-serif; display: flex; align-items: center; justify-content: center; }
+    .container { text-align: center; padding: 2rem; max-width: 500px; }
+    .icon { font-size: 4rem; margin-bottom: 1rem; }
+    h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+    p { color: #888; margin-bottom: 1.5rem; line-height: 1.6; }
+    .offline-info { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 1rem; margin: 1.5rem 0; text-align: left; }
+    .offline-info h3 { color: #e0e0e0; margin-bottom: 0.5rem; font-size: 1rem; }
+    .offline-info ul { list-style: none; padding: 0; }
+    .offline-info li { padding: 0.25rem 0; color: #aaa; font-size: 0.9rem; }
+    .offline-info li::before { content: "✓ "; color: #4caf50; margin-right: 0.5rem; }
+    button { background: #424242; color: #fff; border: none; border-radius: 50px; padding: 1rem 2rem; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #555; }
+    .version { position: fixed; bottom: 1rem; right: 1rem; font-size: 0.7rem; color: #555; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="icon">📵</div>
+    <h1>You're Offline</h1>
+    <p>No internet connection detected. Some features may not work.</p>
+    
+    <div class="offline-info">
+      <h3>Available Offline:</h3>
+      <ul>
+        <li>Game catalog (titles, descriptions, categories)</li>
+        <li>Cached game thumbnails</li>
+        <li>Settings & preferences</li>
+        <li>Panic key & tab cloaking</li>
+      </ul>
+    </div>
+    
+    <div class="offline-info">
+      <h3>Requires Internet:</h3>
+      <ul>
+        <li>Playing games (most load from external sites)</li>
+        <li>Fetching latest game updates</li>
+        <li>Checking game server status</li>
+      </ul>
+    </div>
+    
+    <button onclick="window.location.reload()">Try Again</button>
+    <button onclick="navigator.serviceWorker.controller?.postMessage({type:'SKIP_WAITING'});window.location.reload()" style="margin-top: 1rem; background: #333;">Check for Updates</button>
+  </div>
+  <div class="version" id="version">Loading...</div>
+  
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.ready.then(reg => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = (e) => {
+          if (e.data.version) {
+            document.getElementById('version').textContent = e.data.version;
+          }
+        };
+        reg.active?.postMessage({ type: 'getVersion' }, [channel.port2]);
+      });
+    }
+  </script>
+</body>
+</html>

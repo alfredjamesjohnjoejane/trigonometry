@@ -1,0 +1,2614 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>URL Marketplace - jesherhead</title>
+    <link rel="icon" type="image/png" href="icon.png" />
+    <script>
+      /* Early DevTools/right-click deterrent  -  runs before anything else.
+       Mirrors src/security/index.ts (same rules as the main site).
+       Note: this is a deterrent only  -  DevTools cannot be truly disabled
+       from a web page (browser menu, separate profilers, view-source via
+       other means, etc. all still exist). */
+      (function () {
+        try {
+          var SHIFT_KEYS = { I: 1, J: 1, C: 1, K: 1, E: 1, M: 1, P: 1 };
+          var MAC_KEYS = { I: 1, J: 1, C: 1, U: 1 };
+          function isBlocked(e) {
+            var k = (e.key || '').toUpperCase();
+            if (e.key === 'F12' || e.keyCode === 123) return true;
+            if (e.key === 'ContextMenu') return true;
+            if (e.key === 'F10' && e.shiftKey) return true;
+            var mod = e.ctrlKey || e.metaKey;
+            if (mod && e.shiftKey && SHIFT_KEYS[k]) return true;
+            if (e.metaKey && e.altKey && MAC_KEYS[k]) return true;
+            if (mod && !e.shiftKey && !e.altKey && (k === 'U' || k === 'S')) return true;
+            return false;
+          }
+          document.addEventListener(
+            'contextmenu',
+            function (e) {
+              e.preventDefault();
+            },
+            true
+          );
+          document.addEventListener(
+            'keydown',
+            function (e) {
+              if (isBlocked(e)) {
+                e.preventDefault();
+                e.stopPropagation();
+              }
+            },
+            true
+          );
+          document.addEventListener(
+            'dragstart',
+            function (e) {
+              var t = e.target;
+              if (t && t.tagName === 'IMG') e.preventDefault();
+            },
+            true
+          );
+          function warn() {
+            try {
+              console.clear();
+              console.warn(
+                '%cDevTools is disabled on this site.',
+                'font-size:16px;font-weight:bold;'
+              );
+            } catch (err) {}
+          }
+          warn();
+          window.setInterval(function () {
+            var start = performance.now();
+            // eslint-disable-next-line no-debugger
+            debugger;
+            var elapsed = performance.now() - start;
+            try {
+              if (elapsed > 150) {
+                warn();
+                return;
+              }
+              var wDiff = window.outerWidth - window.innerWidth;
+              var hDiff = window.outerHeight - window.innerHeight;
+              if (wDiff > 200 || hDiff > 200) {
+                warn();
+              }
+            } catch (err) {}
+          }, 3000);
+        } catch (err) {}
+      })();
+    </script>
+    <style>
+      :root {
+        --primary: #e0e0e0;
+        --accent: #9e9e9e;
+        --bg-deep: #111111;
+        --bg-card: #1e1e1e;
+        --border: rgba(255, 255, 255, 0.12);
+        --text-primary: #e0e0e0;
+        --text-secondary: #888888;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-font-smoothing: antialiased;
+      }
+      html {
+        scroll-behavior: smooth;
+      }
+      html,
+      body {
+        width: 100%;
+        min-height: 100vh;
+        overflow-x: hidden;
+        font-family:
+          'Segoe UI',
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+      body {
+        background-image: url('background.jpg');
+        background-size: cover;
+        background-position: center;
+        background-color: #111;
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+        color: var(--text-primary);
+        line-height: 1.6;
+        padding: 40px 24px;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      input,
+      textarea,
+      select,
+      [contenteditable] {
+        -webkit-user-select: text;
+        user-select: text;
+        -webkit-touch-callout: default;
+      }
+      img {
+        -webkit-user-drag: none;
+      }
+      .wrap {
+        width: 100%;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      header {
+        text-align: center;
+        margin-bottom: 32px;
+      }
+      h1 {
+        color: var(--primary);
+        font-size: clamp(2.5rem, 6vw, 4rem);
+        letter-spacing: -1px;
+        font-weight: 800;
+      }
+      .subtitle {
+        color: var(--text-secondary);
+        font-size: 1.2rem;
+        margin-bottom: 24px;
+      }
+      .topbar {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      button {
+        cursor: pointer;
+        border-radius: 50px;
+        font-weight: 600;
+        border: none;
+        font-family: inherit;
+      }
+      .btn-home {
+        padding: 12px 28px;
+        font-size: 0.95rem;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+      }
+      .btn-home:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .sort-btns {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .sort-btn {
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 20px;
+        padding: 6px 16px;
+        color: var(--text-secondary);
+        font-size: 0.8125rem;
+        cursor: pointer;
+        font-weight: 500;
+      }
+      .sort-btn:hover,
+      .sort-btn.active {
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+      }
+      .submit-card {
+        max-width: 640px;
+        margin: 0 auto 32px;
+        padding: 24px;
+        background: rgba(30, 30, 30, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+      }
+      .submit-card h2 {
+        font-size: 1.1rem;
+        margin-bottom: 12px;
+        color: var(--primary);
+      }
+      .form-row {
+        display: flex;
+        gap: 12px;
+      }
+      .form-row input {
+        flex: 1;
+        background: rgba(255, 255, 255, 0.05);
+        border: 2px solid var(--border);
+        border-radius: 50px;
+        padding: 12px 22px;
+        color: var(--text-primary);
+        font-size: 1rem;
+        outline: none;
+      }
+      .form-row input:focus {
+        border-color: var(--primary);
+      }
+      .form-row + .form-row {
+        margin-top: 10px;
+      }
+      .btn-submit {
+        padding: 12px 28px;
+        font-size: 1rem;
+        background: #424242;
+        color: #fff;
+        white-space: nowrap;
+      }
+      .btn-submit:hover {
+        background: #555;
+      }
+      .btn-submit:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .form-note {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-top: 10px;
+        min-height: 1.4em;
+      }
+      .form-note.error {
+        color: #e08080;
+      }
+      .form-hint {
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+        margin-top: 8px;
+      }
+      .grid {
+        display: grid;
+        gap: 24px;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 28px;
+        background: rgba(30, 30, 30, 0.92);
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        position: relative;
+        aspect-ratio: 1 / 1;
+        min-height: 320px;
+        overflow: hidden;
+      }
+      .card:hover {
+        border-color: rgba(255, 255, 255, 0.25);
+      }
+      .url-desc {
+        color: var(--text-secondary);
+        font-size: 0.875rem;
+        line-height: 1.5;
+        min-height: 1.5em;
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow-wrap: break-word;
+      }
+      .cat-picker {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .cat-picker-label {
+        color: var(--text-secondary);
+        font-size: 0.78rem;
+      }
+      .cat-btn {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 6px 14px;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cat-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+        color: var(--text-primary);
+      }
+      .cat-btn.active {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.5);
+        color: #fff;
+      }
+      .cat-btn img {
+        width: 18px;
+        height: 18px;
+        object-fit: contain;
+      }
+      .cat-icon {
+        flex: 1 1 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 96px;
+        padding: 8px 0;
+      }
+      .cat-icon img {
+        width: 96px;
+        height: 96px;
+        object-fit: contain;
+        opacity: 0.92;
+      }
+      .report-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+        padding: 20px;
+      }
+      .report-overlay.open {
+        display: flex;
+      }
+      .report-box {
+        background: #1e1e1e;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 28px;
+        max-width: 520px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+      .report-box h3 {
+        font-size: 1rem;
+      }
+      .report-box p {
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+      }
+      .report-box textarea {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 0.9rem;
+        padding: 10px 12px;
+        min-height: 90px;
+        resize: vertical;
+        outline: none;
+      }
+      .report-box textarea:focus {
+        border-color: var(--primary);
+      }
+      .report-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+      .report-cancel {
+        padding: 8px 20px;
+        font-size: 0.85rem;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+      }
+      .report-submit {
+        padding: 8px 20px;
+        font-size: 0.85rem;
+        background: #424242;
+        color: #fff;
+      }
+      .report-submit:hover {
+        background: #555;
+      }
+      .report-submit:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .report-error {
+        color: #e08080;
+        font-size: 0.8rem;
+        min-height: 1.2em;
+      }
+      #tos-modal {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 100022;
+        background: rgba(0, 0, 0, 0.9);
+        backdrop-filter: blur(12px);
+        align-items: center;
+        justify-content: center;
+        padding: 22px;
+      }
+      #tos-modal.open {
+        display: flex;
+      }
+      .tos-card {
+        width: min(480px, 94vw);
+        background: #151515;
+        border: 1px solid var(--border);
+        border-radius: 26px;
+        padding: 28px;
+        box-shadow: 0 30px 90px rgba(0, 0, 0, 0.68);
+        text-align: center;
+        color: var(--text-primary);
+        max-height: 85vh;
+        overflow-y: auto;
+      }
+      .tos-card h2 {
+        font-size: 1.55rem;
+        margin-bottom: 12px;
+      }
+      .tos-card > p {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+        margin-bottom: 14px;
+      }
+      .tos-content {
+        text-align: left;
+        margin-bottom: 18px;
+      }
+      .tos-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .tos-agree {
+        padding: 10px 28px;
+        font-size: 0.9rem;
+        background: #424242;
+        color: #fff;
+      }
+      .tos-agree:hover {
+        background: #555;
+      }
+      .tos-decline {
+        padding: 10px 28px;
+        font-size: 0.9rem;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-primary);
+      }
+      .tos-decline:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .url-link {
+        color: #fff;
+        font-weight: 700;
+        font-size: 0.95rem;
+        text-decoration: none;
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        overflow-wrap: anywhere;
+        max-width: 100%;
+        min-height: 1.4em;
+      }
+      .url-link:hover {
+        text-decoration: underline;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .status-badge {
+        display: inline-block;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-size: 0.72rem;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+      }
+      .status-working {
+        background: rgba(46, 204, 113, 0.15);
+        color: #2ecc71;
+        border: 1px solid rgba(46, 204, 113, 0.4);
+      }
+      .status-questionable {
+        background: rgba(241, 196, 15, 0.15);
+        color: #f1c40f;
+        border: 1px solid rgba(241, 196, 15, 0.4);
+      }
+      .status-blocked {
+        background: rgba(192, 57, 43, 0.15);
+        color: #e08080;
+        border: 1px solid rgba(192, 57, 43, 0.4);
+      }
+      .idx {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+      }
+      .right-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+      }
+      .reacts {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: auto;
+        justify-content: center;
+      }
+      .react-btn {
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 5px 12px;
+        font-size: 0.82rem;
+        color: var(--text-primary);
+      }
+      .react-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .react-btn:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .react-btn.done {
+        background: rgba(255, 255, 255, 0.22);
+        border-color: rgba(255, 255, 255, 0.55);
+        color: #fff;
+      }
+      .react-btn.report-inline {
+        color: var(--text-secondary);
+      }
+      .report-row {
+        display: flex;
+        justify-content: center;
+      }
+      .no-urls {
+        color: var(--text-secondary);
+        text-align: center;
+        padding: 40px;
+        grid-column: 1 / -1;
+      }
+      .score {
+        color: var(--text-secondary);
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+      .score.positive {
+        color: #2ecc71;
+      }
+      .score.negative {
+        color: #e08080;
+      }
+      .count {
+        text-align: center;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        margin-bottom: 20px;
+      }
+      .mode-banner {
+        display: none;
+        max-width: 640px;
+        margin: 0 auto 20px;
+        padding: 12px 20px;
+        background: rgba(241, 196, 15, 0.12);
+        border: 1px solid rgba(241, 196, 15, 0.4);
+        border-radius: 14px;
+        color: #f1c40f;
+        font-size: 0.85rem;
+        text-align: center;
+        font-weight: 600;
+      }
+      .notice-banner {
+        display: none;
+        max-width: 640px;
+        margin: 0 auto 20px;
+        padding: 12px 44px 12px 20px;
+        background: rgba(66, 135, 245, 0.12);
+        border: 1px solid rgba(66, 135, 245, 0.45);
+        border-radius: 14px;
+        color: #bcd4ff;
+        font-size: 0.9rem;
+        text-align: center;
+        font-weight: 500;
+        position: relative;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .notice-banner.show {
+        display: block;
+      }
+      .notice-dismiss {
+        position: absolute;
+        top: 6px;
+        right: 8px;
+        background: transparent;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 1rem;
+        line-height: 1;
+        padding: 4px 8px;
+      }
+      .notice-dismiss:hover {
+        color: #fff;
+      }
+      .notice-toggle-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+      .notice-toggle-row input {
+        width: auto;
+        margin: 0;
+      }
+      #admin-bar {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 60;
+        background: rgba(10, 10, 10, 0.96);
+        border-bottom: 1px solid var(--border);
+        padding: 8px 16px;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        font-size: 0.78rem;
+        color: var(--text-secondary);
+      }
+      #admin-bar.open {
+        display: flex;
+      }
+      #admin-bar .admin-title {
+        color: #fff;
+        font-weight: 800;
+      }
+      .admin-bar-btn {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        color: var(--text-primary);
+      }
+      .admin-bar-btn:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .admin-bar-btn.active {
+        background: rgba(255, 255, 255, 0.2);
+        border-color: rgba(255, 255, 255, 0.5);
+        color: #fff;
+      }
+      .admin-bar-btn.danger.active {
+        background: rgba(192, 57, 43, 0.45);
+        border-color: rgba(192, 57, 43, 0.7);
+        color: #fff;
+      }
+      .admin-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        border-top: 1px dashed var(--border);
+        padding-top: 10px;
+      }
+      .admin-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 3px 10px;
+        font-size: 0.72rem;
+        color: var(--text-secondary);
+      }
+      .admin-btn:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.14);
+        color: #fff;
+      }
+      .admin-btn.danger {
+        color: #e08080;
+        border-color: rgba(192, 57, 43, 0.4);
+      }
+      .admin-btn:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .card.removed {
+        opacity: 0.65;
+      }
+      .flag-tag {
+        color: #f1c40f;
+        font-size: 0.72rem;
+        font-weight: 700;
+      }
+      .report-box input {
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 0.9rem;
+        padding: 10px 12px;
+        outline: none;
+        width: 100%;
+        margin-bottom: 10px;
+      }
+      .report-box input:focus {
+        border-color: var(--primary);
+      }
+      @media (max-width: 600px) {
+        .form-row {
+          flex-direction: column;
+        }
+        .btn-submit {
+          width: 100%;
+        }
+        .card {
+          aspect-ratio: auto;
+          min-height: 240px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="admin-bar">
+      <span class="admin-title">Admin</span>
+      <span id="admin-mode-label">mode: normal</span>
+      <button class="admin-bar-btn" data-mode="normal">Normal</button>
+      <button class="admin-bar-btn" data-mode="readonly">Read-only</button>
+      <button class="admin-bar-btn danger" data-mode="off">Shut down</button>
+      <button class="admin-bar-btn" data-view="all">All</button>
+      <button class="admin-bar-btn" data-view="removed">Removed</button>
+      <button class="admin-bar-btn" data-view="reports">
+        Reports<span id="admin-report-count"></span>
+      </button>
+      <button class="admin-bar-btn" id="admin-notice-btn">📢 Notice</button>
+      <button class="admin-bar-btn" id="admin-logout">Logout</button>
+    </div>
+    <div class="wrap">
+      <header>
+        <h1>URL Marketplace</h1>
+        <p class="subtitle">Community movie &amp; game links  -  submit one, vote, report</p>
+        <div class="topbar">
+          <button class="btn-home" onclick="window.location.href = 'index.html'">← Home</button>
+          <div class="sort-btns" style="display: flex; gap: 8px; align-items: center">
+            <button class="sort-btn" data-sort="points">Sort by points</button>
+            <button class="sort-btn" data-sort="recent">Sort by recent</button>
+          </div>
+        </div>
+        <script>
+          // Set initial active state
+          document.querySelector('.sort-btn[data-sort="points"]').classList.add('active');
+        </script>
+      </header>
+
+      <div class="submit-card">
+        <h2>Submit a URL</h2>
+        <form id="url-form">
+          <div class="form-row">
+            <input
+              type="text"
+              id="url-input"
+              name="url"
+              placeholder="https://example.com/..."
+              autocomplete="off"
+            />
+            <button type="submit" class="btn-submit" id="submit-btn">Submit</button>
+          </div>
+          <div class="form-row">
+            <input
+              type="text"
+              id="desc-input"
+              name="description"
+              placeholder="Short description (optional, max 50 chars)"
+              maxlength="50"
+              autocomplete="off"
+            />
+          </div>
+          <div class="cat-picker">
+            <span class="cat-picker-label">Category:</span>
+            <button type="button" class="cat-btn" data-cat="ai">
+              <img src="icons/aiicon.svg" alt="" />AI
+            </button>
+            <button type="button" class="cat-btn" data-cat="media">
+              <img src="icons/movieicon.svg" alt="" />Media
+            </button>
+            <button type="button" class="cat-btn" data-cat="games">
+              <img src="icons/gameicon.png" alt="" />Games
+            </button>
+          </div>
+          <p class="form-note" id="form-note"></p>
+          <p class="form-hint">
+            No adult, malware, or binary-download links, submissions are screened.
+            Descriptions are optional (max 50 chars, no links, keep it clean).
+          </p>
+        </form>
+      </div>
+
+      <div class="mode-banner" id="mode-banner"></div>
+      <div class="notice-banner" id="notice-banner"></div>
+      <p class="count" id="count"></p>
+      <div class="grid" id="url-list">
+        <div class="no-urls">Loading…</div>
+      </div>
+    </div>
+
+    <div class="report-overlay" id="report-overlay">
+      <div class="report-box">
+        <h3>🚩 Report this link?</h3>
+        <p id="report-target"></p>
+        <textarea
+          id="report-reason"
+          placeholder="Why should I review it? (optional, max 500 chars)"
+          maxlength="500"
+        ></textarea>
+        <p class="report-error" id="report-error"></p>
+        <div class="report-actions">
+          <button class="report-cancel" id="report-cancel">Cancel</button>
+          <button class="report-submit" id="report-submit">Send report</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-overlay" id="admin-login-overlay">
+      <div class="report-box">
+        <h3>Admin login</h3>
+        <form id="admin-login-form" autocomplete="off">
+          <input type="text" id="admin-user" placeholder="Username" autocomplete="off" />
+          <input type="password" id="admin-pass" placeholder="Password" autocomplete="off" />
+          <p class="report-error" id="admin-login-error"></p>
+          <div class="report-actions">
+            <button type="button" class="report-cancel" id="admin-login-cancel">Cancel</button>
+            <button type="submit" class="report-submit" id="admin-login-submit">Log in</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="report-overlay" id="admin-notice-overlay">
+      <div class="report-box">
+        <h3>📢 Info banner</h3>
+        <p>Shown to all users at the top of the marketplace. Plain text, max 500 chars.</p>
+        <textarea
+          id="admin-notice-text"
+          placeholder="e.g. Downtime Sunday 2am, new rules, discord link…"
+          maxlength="500"
+        ></textarea>
+        <label class="notice-toggle-row">
+          <input type="checkbox" id="admin-notice-visible" /> Visible to users
+        </label>
+        <p class="report-error" id="admin-notice-error"></p>
+        <div class="report-actions">
+          <button class="report-cancel" id="admin-notice-cancel">Cancel</button>
+          <button class="report-submit" id="admin-notice-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tos-modal">
+      <div class="tos-card">
+        <h2>Terms of Service</h2>
+        <p>
+          Please read the following Terms of Service carefully. By clicking "I Agree", you confirm
+          that you have read, understood, and agree to be bound by these terms.
+        </p>
+        <div class="tos-content" id="tos-content"></div>
+        <div class="tos-actions">
+          <button class="tos-agree" id="tos-agree">I Agree</button>
+          <button class="tos-decline" id="tos-decline">Decline</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        // Owner setup: deployed Worker URL.
+        var WORKER_URL = 'https://url-marketplace.jesherhead.workers.dev';
+        // 4 vote buttons at the bottom of each card. Weights feed the score sort:
+        // 👍 +1, 👎 -1, 🔥 +2 (double), ❌ -5.
+        var REACTIONS = [
+          { key: 'thumbsup', emoji: '👍', weight: 1, title: 'Thumbs up (+1)' },
+          { key: 'thumbsdown', emoji: '👎', weight: -1, title: 'Thumbs down (-1)' },
+          { key: 'fire', emoji: '🔥', weight: 2, title: 'Fire (+2)' },
+          { key: 'redx', emoji: '❌', weight: -5, title: 'Red X (-5)' },
+        ];
+        var WEIGHTS = { thumbsup: 1, thumbsdown: -1, fire: 2, redx: -5 };
+        // Tile icon per category. src values are fixed here — the server's
+        // category string is only ever used as a lookup key, never as a URL.
+        var CATEGORY_ICONS = {
+          ai: { src: 'icons/aiicon.svg', label: 'AI' },
+          media: { src: 'icons/movieicon.svg', label: 'Media' },
+          games: { src: 'icons/gameicon.png', label: 'Games' },
+        };
+        // Currently picked category in the submit form ('' = none).
+        var selectedCategory = '';
+
+        var form = document.getElementById('url-form');
+        var urlInput = document.getElementById('url-input');
+        var descInput = document.getElementById('desc-input');
+        var submitBtn = document.getElementById('submit-btn');
+        var formNote = document.getElementById('form-note');
+        var urlList = document.getElementById('url-list');
+        var countEl = document.getElementById('count');
+
+        var pending = [];
+        try {
+          pending = JSON.parse(localStorage.getItem('marketplace_urls_pending')) || [];
+        } catch (err) {
+          pending = [];
+        }
+        var reacted = {};
+        var voted = {};
+        try {
+          // New single-vote map: { "<issueId>": "<reactionKey>" }.
+          voted = JSON.parse(localStorage.getItem('marketplace_voted')) || {};
+        } catch (err) {
+          voted = {};
+        }
+        // Migrate legacy per-emoji map (marketplace_reacted: { "id:type": true })
+        // to the single-vote map so old voters stay locked to one vote.
+        try {
+          reacted = JSON.parse(localStorage.getItem('marketplace_reacted')) || {};
+        } catch (err) {
+          reacted = {};
+        }
+        Object.keys(reacted).forEach(function (k) {
+          var parts = String(k).split(':');
+          var id = parts[0];
+          var type = parts.slice(1).join(':');
+          if (id && type && !voted[id]) {
+            voted[id] = type;
+          }
+        });
+        // Cookie backup so the single vote survives even if localStorage is cleared.
+        try {
+          document.cookie.split(';').forEach(function (c) {
+            var kv = c.trim().split('=');
+            if (kv[0] === 'marketplace_voted') {
+              var fromCookie = JSON.parse(decodeURIComponent(kv[1] || '{}'));
+              Object.keys(fromCookie).forEach(function (id) {
+                if (!voted[id]) {
+                  voted[id] = fromCookie[id];
+                }
+              });
+            }
+          });
+        } catch (err) {}
+        // Per-browser voter id: one vote per browser, not one per IP, so
+        // people sharing a public IP (school/work/mobile NAT) don't
+        // overwrite each other's emoji votes. Sent as `voter` on /react;
+        // the worker falls back to IP only for old clients without one.
+        var voterId = null;
+        function getVoterId() {
+          if (voterId && /^[A-Za-z0-9_-]{8,64}$/.test(voterId)) return voterId;
+          try {
+            voterId = localStorage.getItem('marketplace_voter') || null;
+          } catch (err) {
+            voterId = null;
+          }
+          if (!voterId) {
+            try {
+              document.cookie.split(';').forEach(function (c) {
+                var kv = c.trim().split('=');
+                if (kv[0] === 'marketplace_voter' && kv[1]) {
+                  var cv = decodeURIComponent(kv[1]);
+                  if (/^[A-Za-z0-9_-]{8,64}$/.test(cv)) voterId = cv;
+                }
+              });
+            } catch (err) {}
+          }
+          if (!voterId || !/^[A-Za-z0-9_-]{8,64}$/.test(voterId)) {
+            var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            var bytes = null;
+            try {
+              if (window.crypto && window.crypto.getRandomValues) {
+                bytes = new Uint32Array(32);
+                window.crypto.getRandomValues(bytes);
+              }
+            } catch (err) {
+              bytes = null;
+            }
+            voterId = '';
+            for (var i = 0; i < 32; i++) {
+              var idx = bytes
+                ? bytes[i] % chars.length
+                : Math.floor(Math.random() * chars.length);
+              voterId += chars.charAt(idx);
+            }
+            try {
+              localStorage.setItem('marketplace_voter', voterId);
+            } catch (err) {}
+          }
+          try {
+            document.cookie =
+              'marketplace_voter=' +
+              encodeURIComponent(voterId) +
+              '; max-age=157680000; path=/; SameSite=Lax' +
+              (location.protocol === 'https:' ? '; Secure' : '');
+          } catch (err) {}
+          return voterId;
+        }
+        getVoterId();
+        // Reported-issue ids (one report per browser per URL).
+        var reported = {};
+        try {
+          reported = JSON.parse(localStorage.getItem('marketplace_reported')) || {};
+        } catch (err) {
+          reported = {};
+        }
+        // Server-confirmed vote per issue id: { "<issueId>": "<reactionKey>" }.
+        // This is the vote value the server is known to reflect. The display
+        // adds +1 for a local vote the server hasn't confirmed yet and -1 for
+        // a confirmed vote the user just cleared/switched away from, so counts
+        // move instantly AND land exactly on the server value once confirmed.
+        // On load every persisted vote is assumed synced (this also self-heals
+        // phantom +1s left behind by older builds that kept failed votes).
+        var confirmedVote = {};
+        try {
+          var legacyConfirmed = JSON.parse(localStorage.getItem('marketplace_confirmed')) || {};
+          Object.keys(voted).forEach(function (id) {
+            if (voted[id] === 'heart') return; // legacy type retired (see below)
+            if (legacyConfirmed[String(id)] === true || legacyConfirmed[String(id)] === voted[id]) {
+              confirmedVote[String(id)] = voted[id];
+            } else if (!(String(id) in legacyConfirmed)) {
+              confirmedVote[String(id)] = voted[id];
+            }
+          });
+          // Drop retired 'heart' votes so nobody stays stuck on a button that
+          // no longer exists; the user can simply vote again.
+          Object.keys(voted).forEach(function (id) {
+            if (voted[id] === 'heart') {
+              delete voted[id];
+            }
+          });
+        } catch (err) {
+          confirmedVote = {};
+        }
+        // Last server list  -  re-rendered instantly on every local interaction.
+        var serverEntries = [];
+        // In-flight vote requests per issue (prevents overlapping switch races).
+        var voting = {};
+        var reportTargetId = null;
+        // Admin panel state (session token lives in sessionStorage only, so it
+        // clears when the tab closes). Real enforcement happens worker-side.
+        var adminToken = null;
+        try {
+          adminToken = sessionStorage.getItem('marketplace_admin') || null;
+        } catch (err) {}
+        var isAdmin = false;
+        var adminView = 'all'; // all | removed | reports
+        var sortBy = 'points'; // 'points' | 'recent'
+        var closedEntries = [];
+        var reportedIds = {};
+        var serverMode = 'normal';
+        // Public info banner set by admins ({text, updatedAt} or null).
+        var publicNotice = null;
+        // Admin copy including hidden text ({text, visible, updatedAt}).
+        var adminNotice = { text: '', visible: false, updatedAt: 0 };
+
+        function esc(s) {
+          return String(s).replace(/[&<>"']/g, function (c) {
+            return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+          });
+        }
+
+        function normalize(entry) {
+          if (!entry) return null;
+          var rawUrl = entry.url || (entry.fields && entry.fields.url);
+          if (typeof rawUrl !== 'string') return null;
+          // Trim first: whitespace-only or scheme-only values ('https://')
+          // otherwise pass through and render an empty, invisible link.
+          var url = rawUrl.trim();
+          if (!url) return null;
+          var status = entry.status || (entry.fields && entry.fields.status) || 'working';
+          return {
+            id: entry.id,
+            url: url,
+            description: String(entry.description || '').slice(0, 50),
+            category: CATEGORY_ICONS[entry.category] ? entry.category : '',
+            status: String(status),
+            submittedAt: entry.submittedAt || entry.date || null,
+            closed: !!entry.closed,
+            reactions: entry.reactions || {
+              thumbsup: 0,
+              thumbsdown: 0,
+              fire: 0,
+              redx: 0,
+            },
+          };
+        }
+
+        // Shorthand display: "example.com/path…"  -  full URL lives in title/hover.
+        function shortUrl(full) {
+          var s = String(full || '').trim();
+          if (!s) return 'Untitled link';
+          var text = '';
+          try {
+            var u = new URL(s);
+            var host = u.hostname;
+            var path = (u.pathname === '/' ? '' : u.pathname) + (u.search || '');
+            text = host + path;
+            if (text.length > 34) {
+              text = text.slice(0, 32) + '…';
+            }
+            if (text) return text;
+            // Valid URL but nothing displayable (e.g. 'https://'): fall through
+            // to the raw-text fallback below instead of an invisible link.
+          } catch (err) {
+            /* fall through to raw-text fallback */
+          }
+          var bare = s.replace(/^https?:\/\//i, '');
+          if (!bare) return 'Untitled link';
+          return bare.length > 34 ? bare.slice(0, 32) + '…' : bare;
+        }
+
+        // Optimistic display count: adjusts the last server-confirmed value by
+        // your pending local change, so the UI updates instantly without
+        // waiting for the network and lands exactly on the server count.
+        function displayCount(u, key) {
+          var n = parseInt((u.reactions && u.reactions[key]) || 0, 10);
+          if (isNaN(n) || n < 0) n = 0;
+          if (!u || u.id == null) return n;
+          var id = String(u.id);
+          if (voted[id] === key && confirmedVote[id] !== key) {
+            n += 1;
+          } else if (voted[id] !== key && confirmedVote[id] === key) {
+            n -= 1;
+            if (n < 0) n = 0;
+          }
+          return n;
+        }
+
+        // Community-driven status from vote ratios (uses optimistic counts, so the
+        // badge flips instantly on vote). ❌ means "blocked", but one bad report
+        // can never flip it  -  "blocked" needs 2+ ❌ outweighing the positives.
+        // A single ❌, repeat 👎, or a negative score only earns "questionable".
+        // With zero votes, the stored server status is used as-is.
+        function derivedStatus(u) {
+          var up = displayCount(u, 'thumbsup');
+          var down = displayCount(u, 'thumbsdown');
+          var fire = displayCount(u, 'fire');
+          var redx = displayCount(u, 'redx');
+          var total = up + down + fire + redx;
+          if (!total) return (u && u.status) || 'working';
+          var positive = up + 2 * fire;
+          var negative = down + 5 * redx;
+          if (redx >= 2 && negative > positive) return 'blocked';
+          if (redx >= 1 || down >= 2 || (total >= 3 && positive - negative < 0))
+            return 'questionable';
+          return 'working';
+        }
+
+        // Weighted score used for sorting: 👍 +1, 👎 -1, 🔥 +2, ❌ -5.
+        // Uses optimistic display counts so re-sorting is instant.
+        function scoreOf(entry) {
+          function num(k) {
+            return displayCount(entry || {}, k);
+          }
+          return (
+            num('thumbsup') * WEIGHTS.thumbsup +
+            num('thumbsdown') * WEIGHTS.thumbsdown +
+            num('fire') * WEIGHTS.fire +
+            num('redx') * WEIGHTS.redx
+          );
+        }
+
+        // Instant client-side mirror of the worker's submission safety filters
+        // (the worker re-checks everything; this just gives faster feedback).
+        /* FILTER-LISTS-START */
+        var ADULT_TLDS = ['xxx', 'adult', 'porn', 'sex', 'sexy'];
+        var BLOCKED_DOMAINS = [
+          'pornhub.com',
+          'xvideos.com',
+          'xnxx.com',
+          'xhamster.com',
+          'redtube.com',
+          'youporn.com',
+          'youjizz.com',
+          'tube8.com',
+          'spankbang.com',
+          'spankwire.com',
+          'keezmovies.com',
+          'tnaflix.com',
+          'empaflix.com',
+          'eporner.com',
+          'pornhd.com',
+          'pornone.com',
+          'porn.com',
+          'beeg.com',
+          '4tube.com',
+          'drtuber.com',
+          'fux.com',
+          'hclips.com',
+          'vporn.com',
+          'upornia.com',
+          'txxx.com',
+          'nudevista.com',
+          'pornoxo.com',
+          'brazzers.com',
+          'bangbros.com',
+          'realitykings.com',
+          'naughtyamerica.com',
+          'mofos.com',
+          'teamskeet.com',
+          'blacked.com',
+          'tushy.com',
+          'vixen.com',
+          'twistys.com',
+          'penthouse.com',
+          'playboy.com',
+          'hustler.com',
+          'onlyfans.com',
+          'fansly.com',
+          'manyvids.com',
+          'clips4sale.com',
+          'chaturbate.com',
+          'myfreecams.com',
+          'livejasmin.com',
+          'streamate.com',
+          'camsoda.com',
+          'bongacams.com',
+          'stripchat.com',
+          'xlovecam.com',
+          'cam4.com',
+          'nhentai.net',
+          'hanime.tv',
+          'hentaifoundry.com',
+          'e621.net',
+          'motherless.com',
+          'efukt.com',
+          'literotica.com',
+        ];
+        var ADULT_LABELS = [
+          'porn',
+          'porno',
+          'porns',
+          'porntube',
+          'sextube',
+          'hentaitube',
+          'xxx',
+          'hentai',
+          'sex',
+          'sexy',
+          'adult',
+          'escort',
+          'escorts',
+          'camgirl',
+          'camgirls',
+          'nude',
+          'nudes',
+          'boobs',
+          'milf',
+        ];
+        var BLOCKED_EXTENSIONS = [
+          'exe',
+          'msi',
+          'apk',
+          'apks',
+          'xapk',
+          'dmg',
+          'pkg',
+          'scr',
+          'bat',
+          'cmd',
+          'com',
+          'pif',
+          'ps1',
+          'vbs',
+          'msc',
+        ];
+        /* FILTER-LISTS-END */
+
+        // Description screen (mirrors the worker's checkDescription — the
+        // worker re-checks everything; this just gives faster feedback).
+        // Whole words only (never substrings), max 50 chars, no links.
+        var BANNED_DESC_WORDS = [
+          'fuck', 'fucker', 'fucking', 'fucked', 'shit', 'shitty', 'bitch', 'bitches',
+          'cunt', 'dick', 'dickhead', 'cock', 'cocksucker', 'pussy', 'tits', 'titties',
+          'boobs', 'boob', 'porn', 'porno', 'porns', 'hentai', 'xxx', 'slut', 'sluts',
+          'whore', 'whores', 'escort', 'escorts', 'nude', 'nudes', 'nudity', 'naked',
+          'sex', 'sexy', 'masturbate', 'orgasm', 'cum', 'cumming', 'dildo', 'blowjob',
+          'handjob', 'anal', 'milf', 'incest', 'bestiality', 'asshole', 'bastard',
+          'nigga', 'nigger', 'faggot', 'retard',
+        ];
+        var DESC_LINK_PATTERN =
+          /(https?:\/\/|www\.|[a-z0-9-]+\.(com|net|org|io|co|dev|app|gg|xyz|site|online|store|info|biz|me|tv|cc|to|ly|gl|tk|ml|ga|cf)\b)/i;
+
+        // Returns a rejection message, or null when the description passes.
+        function descFilterReason(text) {
+          var t = String(text || '').trim();
+          if (!t) return null;
+          if (DESC_LINK_PATTERN.test(t)) {
+            return 'Links are not allowed in descriptions.';
+          }
+          var words = t.toLowerCase().split(/[^a-z0-9]+/);
+          for (var i = 0; i < words.length; i++) {
+            if (words[i] && BANNED_DESC_WORDS.indexOf(words[i]) !== -1) {
+              return 'That description contains blocked words.';
+            }
+          }
+          return null;
+        }
+
+        // Returns a rejection message, or null when the host/path passes.
+        // Labels match whole DNS labels only (never substrings).
+        function urlFilterReason(host, pathname) {
+          var labels = String(host || '')
+            .toLowerCase()
+            .split('.');
+          if (ADULT_TLDS.indexOf(labels[labels.length - 1]) !== -1) {
+            return 'Adult sites are not allowed in this marketplace.';
+          }
+          for (var i = 0; i < BLOCKED_DOMAINS.length; i++) {
+            var d = BLOCKED_DOMAINS[i];
+            if (host === d || host.slice(-d.length - 1) === '.' + d) {
+              return 'That site is on the blocklist.';
+            }
+          }
+          for (var j = 0; j < labels.length; j++) {
+            if (ADULT_LABELS.indexOf(labels[j]) !== -1) {
+              return 'Adult sites are not allowed in this marketplace.';
+            }
+          }
+          var ext = String(pathname || '')
+            .toLowerCase()
+            .match(/\.([a-z0-9]{1,5})$/);
+          if (ext && BLOCKED_EXTENSIONS.indexOf(ext[1]) !== -1) {
+            return 'Direct app/binary downloads are not allowed  -  submit the site instead.';
+          }
+          return null;
+        }
+
+        // Real URL validation: must parse and be a public http(s) address.
+        function validateUrl(raw) {
+          var value = (raw || '').trim();
+          if (!value) return { ok: false, message: 'Please enter a URL.' };
+          var withScheme = /^https?:\/\//i.test(value) ? value : 'https://' + value;
+          var u;
+          try {
+            u = new URL(withScheme);
+          } catch (err) {
+            return { ok: false, message: 'That does not look like a valid URL.' };
+          }
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+            return { ok: false, message: 'Only http:// and https:// links are allowed.' };
+          }
+          var host = u.hostname.toLowerCase();
+          if (!host || host.indexOf('.') === -1) {
+            return { ok: false, message: 'That hostname does not look valid.' };
+          }
+          if (
+            /^(localhost|0\.0\.0\.0)$/.test(host) ||
+            /\.local$/.test(host) ||
+            /\.localhost$/.test(host) ||
+            /\.internal$/.test(host) ||
+            /\.lan$/.test(host) ||
+            /^(127\.|10\.|192\.168\.|169\.254\.)/.test(host) ||
+            /^172\.(1[6-9]|2\d|30|31)\./.test(host)
+          ) {
+            return { ok: false, message: 'Local and private addresses are not allowed.' };
+          }
+          var blocked = urlFilterReason(host, u.pathname);
+          if (blocked) {
+            return { ok: false, message: blocked };
+          }
+          return { ok: true, url: u.toString() };
+        }
+
+        function render(entries) {
+          if (!entries.length) {
+            urlList.innerHTML =
+              '<div class="no-urls">No URLs yet. Be the first to submit one above.</div>';
+            countEl.textContent = '';
+            return;
+          }
+          countEl.textContent = entries.length + (entries.length === 1 ? ' link' : ' links');
+          urlList.innerHTML = entries
+            .slice(0, 100)
+            .map(function (u, i) {
+              var shown = u.pending ? u.status : u.closed ? 'removed' : derivedStatus(u);
+              var badge = u.pending
+                ? '<span class="status-badge status-' +
+                  esc(shown) +
+                  '">' +
+                  esc(shown) +
+                  ' · pending</span>'
+                : u.closed
+                  ? '<span class="status-badge status-blocked">removed</span>'
+                  : '<span class="status-badge status-' +
+                    esc(shown) +
+                    '">' +
+                    esc(shown) +
+                    '</span>';
+              var flagTag =
+                !u.pending && u.id != null && reportedIds[String(u.id)]
+                  ? '<span class="flag-tag">🚩 flagged</span>'
+                  : '';
+              var sc = scoreOf(u);
+              var scClass = sc > 0 ? 'score positive' : sc < 0 ? 'score negative' : 'score';
+              var scoreHtml = u.pending
+                ? ''
+                : '<span class="' + scClass + '">' + (sc > 0 ? '+' + sc : sc) + ' pts</span>';
+              var reacts = '';
+              var reportBtn = '';
+              if (!u.pending && !u.closed && u.id != null) {
+                // Centered report row sitting just above the centered emoji row.
+                var isReported = !!reported[String(u.id)];
+                reportBtn =
+                  '<div class="report-row"><button class="react-btn report-inline" data-report="' +
+                  u.id +
+                  '" data-id="' +
+                  u.id +
+                  '"' +
+                  ' title="Report this link for owner review"' +
+                  (isReported ? ' disabled' : '') +
+                  '>' +
+                  (isReported ? 'Reported ✓' : '🚩 Report') +
+                  '</button></div>';
+                // Switchable single vote: yours is highlighted, the rest stay
+                // clickable so you can change your mind (or click yours to clear).
+                var myVote = voted[String(u.id)];
+                var busy = !!voting[String(u.id)];
+                reacts =
+                  '<div class="reacts">' +
+                  REACTIONS.map(function (r) {
+                    var n = displayCount(u, r.key);
+                    var mine = myVote === r.key;
+                    var hint = mine
+                      ? '  -  your vote (click to remove)'
+                      : myVote
+                        ? '  -  switch your vote'
+                        : '';
+                    return (
+                      '<button class="react-btn' +
+                      (mine ? ' done' : '') +
+                      '" data-react="' +
+                      r.key +
+                      '" data-id="' +
+                      u.id +
+                      '"' +
+                      ' title="' +
+                      esc(r.title) +
+                      hint +
+                      '"' +
+                      (busy ? ' disabled' : '') +
+                      '>' +
+                      r.emoji +
+                      ' ' +
+                      n +
+                      '</button>'
+                    );
+                  }).join('') +
+                  '</div>';
+              }
+              var catIcon = CATEGORY_ICONS[u.category]
+                ? '<div class="cat-icon"><img src="' +
+                  CATEGORY_ICONS[u.category].src +
+                  '" alt="' +
+                  CATEGORY_ICONS[u.category].label +
+                  ' icon" loading="lazy" /></div>'
+                : '';
+              var adminRow = '';
+              if (isAdmin && !u.pending && u.id != null) {
+                var uid = String(u.id);
+                if (u.closed) {
+                  adminRow =
+                    '<div class="admin-row"><button class="admin-btn" data-admin="restore" data-id="' +
+                    u.id +
+                    '">Restore</button></div>';
+                } else {
+                  adminRow =
+                    '<div class="admin-row">' +
+                    '<button class="admin-btn" data-admin="status:working" data-id="' +
+                    u.id +
+                    '">✓ Working</button>' +
+                    '<button class="admin-btn" data-admin="status:blocked" data-id="' +
+                    u.id +
+                    '">✕ Blocked</button>' +
+                    '<button class="admin-btn danger" data-admin="remove" data-id="' +
+                    u.id +
+                    '">Remove</button>' +
+                    (reportedIds[uid]
+                      ? '<button class="admin-btn" data-admin="clear" data-id="' +
+                        u.id +
+                        '">Clear flag</button>'
+                      : '') +
+                    '</div>';
+                }
+              }
+              return (
+                '<div class="card' +
+                (u.closed ? ' removed' : '') +
+                '">' +
+                '<a class="url-link" href="' +
+                esc(u.url) +
+                '" title="' +
+                esc(u.url) +
+                '" rel="noopener">' +
+                esc(shortUrl(u.url)) +
+                '</a>' +
+                (u.description
+                  ? '<div class="url-desc">' + esc(u.description) + '</div>'
+                  : '') +
+                '<div class="row">' +
+                badge +
+                flagTag +
+                '<span class="right-meta">' +
+                scoreHtml +
+                '<span class="idx">#' +
+                (i + 1) +
+                '</span></span></div>' +
+                catIcon +
+                reportBtn +
+                reacts +
+                adminRow +
+                '</div>'
+              );
+            })
+            .join('');
+        }
+
+        // Patch one entry from a vote/remove API response into the last server
+        // list, so the fresh server counts become the new display baseline
+        // without a full refetch (no flicker, no double-count).
+        function patchServerEntry(entry) {
+          var n = normalize(entry);
+          if (!n || n.id == null) return;
+          var found = false;
+          for (var i = 0; i < serverEntries.length; i++) {
+            var cur = normalize(serverEntries[i]);
+            if (cur && String(cur.id) === String(n.id)) {
+              serverEntries[i] = entry;
+              found = true;
+              break;
+            }
+          }
+          if (!found) serverEntries.push(entry);
+        }
+
+        function renderCombined(repoEntries) {
+          var seen = {};
+          var combined = [];
+          var scored = [];
+          var source = repoEntries || [];
+          var adminOnlyView = isAdmin && adminView !== 'all';
+          if (isAdmin && adminView === 'removed') source = closedEntries;
+          source.forEach(function (e) {
+            var n = normalize(e);
+            if (n && !seen[n.url]) {
+              seen[n.url] = true;
+              scored.push(n);
+            }
+          });
+          if (isAdmin && adminView === 'reports') {
+            scored = scored.filter(function (n) {
+              return n.id != null && reportedIds[String(n.id)];
+            });
+          }
+          // Sort shared URLs by selected method, then newest first as tiebreak.
+          scored.sort(function (a, b) {
+            var scoreA = scoreOf(a);
+            var scoreB = scoreOf(b);
+            var diff;
+            if (sortBy === 'recent') {
+              diff = 0;
+            } else {
+              diff = scoreB - scoreA;
+            }
+            if (diff !== 0) return diff;
+            var ta = a.submittedAt ? Date.parse(a.submittedAt) : 0;
+            var tb = b.submittedAt ? Date.parse(b.submittedAt) : 0;
+            return tb - ta;
+          });
+          scored.forEach(function (n) {
+            combined.push(n);
+          });
+          if (!adminOnlyView) {
+            pending.forEach(function (e) {
+              var n = normalize(e);
+              if (n && !seen[n.url]) {
+                seen[n.url] = true;
+                n.pending = true;
+                combined.unshift(n);
+              }
+            });
+          }
+          render(combined);
+        }
+
+        function savePending() {
+          try {
+            localStorage.setItem('marketplace_urls_pending', JSON.stringify(pending.slice(0, 100)));
+            localStorage.setItem('marketplace_reacted', JSON.stringify(reacted));
+            localStorage.setItem('marketplace_voted', JSON.stringify(voted));
+            localStorage.setItem('marketplace_reported', JSON.stringify(reported));
+            localStorage.setItem('marketplace_confirmed', JSON.stringify(confirmedVote));
+            document.cookie =
+              'marketplace_voted=' +
+              encodeURIComponent(JSON.stringify(voted)) +
+              '; max-age=2592000; path=/; SameSite=Lax' +
+              (location.protocol === 'https:' ? '; Secure' : '');
+          } catch (err) {}
+        }
+
+        function api(path, options) {
+          return fetch(WORKER_URL.replace(/\/$/, '') + path, options);
+        }
+
+        function apiAuth(path, options) {
+          options = options || {};
+          var headers = { 'Content-Type': 'application/json' };
+          if (adminToken) headers['Authorization'] = 'Bearer ' + adminToken;
+          options.headers = headers;
+          return api(path, options);
+        }
+
+        var modeBanner = document.getElementById('mode-banner');
+        var noticeBanner = document.getElementById('notice-banner');
+
+        function renderNotice() {
+          if (!noticeBanner) return;
+          var dismissed = null;
+          try {
+            dismissed = sessionStorage.getItem('marketplace_notice_dismissed');
+          } catch (err) {}
+          if (
+            publicNotice &&
+            publicNotice.text &&
+            String(dismissed) !== String(publicNotice.updatedAt || publicNotice.text)
+          ) {
+            noticeBanner.innerHTML = '';
+            var span = document.createElement('span');
+            span.textContent = publicNotice.text;
+            noticeBanner.appendChild(span);
+            var x = document.createElement('button');
+            x.className = 'notice-dismiss';
+            x.setAttribute('aria-label', 'Dismiss announcement');
+            x.textContent = '✕';
+            x.addEventListener('click', function () {
+              try {
+                sessionStorage.setItem(
+                  'marketplace_notice_dismissed',
+                  String(publicNotice.updatedAt || publicNotice.text)
+                );
+              } catch (err) {}
+              renderNotice();
+            });
+            noticeBanner.appendChild(x);
+            noticeBanner.classList.add('show');
+          } else {
+            noticeBanner.classList.remove('show');
+            noticeBanner.innerHTML = '';
+          }
+        }
+
+        function fetchPublicNotice() {
+          // Fallback for cached/older workers whose /list has no notice field.
+          api('/notice')
+            .then(function (res) {
+              return res.json().catch(function () {
+                return null;
+              });
+            })
+            .then(function (data) {
+              if (data && 'notice' in data) {
+                publicNotice = data.notice;
+                renderNotice();
+              }
+            })
+            .catch(function () {});
+        }
+
+        function applyMode() {
+          var frozen = serverMode !== 'normal';
+          if (serverMode === 'off') {
+            modeBanner.textContent = 'Marketplace is temporarily unavailable. Check back soon.';
+            modeBanner.style.display = 'block';
+          } else if (serverMode === 'readonly') {
+            modeBanner.textContent =
+              'Read-only mode: browsing only, voting and submitting are paused.';
+            modeBanner.style.display = 'block';
+          } else {
+            modeBanner.style.display = 'none';
+          }
+          urlInput.disabled = frozen;
+          submitBtn.disabled = frozen;
+          var label = document.getElementById('admin-mode-label');
+          if (label) label.textContent = 'mode: ' + serverMode;
+          var btns = document.querySelectorAll('#admin-bar [data-mode]');
+          for (var i = 0; i < btns.length; i++) {
+            if (btns[i].getAttribute('data-mode') === serverMode) btns[i].classList.add('active');
+            else btns[i].classList.remove('active');
+          }
+          var views = document.querySelectorAll('#admin-bar [data-view]');
+          for (var j = 0; j < views.length; j++) {
+            if (views[j].getAttribute('data-view') === adminView) views[j].classList.add('active');
+            else views[j].classList.remove('active');
+          }
+        }
+
+        function refreshSharedList() {
+          api('/list')
+            .then(function (response) {
+              return response
+                .json()
+                .catch(function () {
+                  return null;
+                })
+                .then(function (data) {
+                  if (response.status === 503 && data && data.disabled) {
+                    serverMode = 'off';
+                    serverEntries = [];
+                    urlList.innerHTML = '';
+                    countEl.textContent = '';
+                    publicNotice = (data && data.notice) || null;
+                    renderNotice();
+                    applyMode();
+                    return;
+                  }
+                  if (!response.ok || !data) throw new Error('list failed');
+                  serverMode = (data && data.mode) || 'normal';
+                  var urls = {};
+                  serverEntries = (data && data.entries) || [];
+                  if (data && 'notice' in data) {
+                    publicNotice = data.notice;
+                    renderNotice();
+                  } else {
+                    fetchPublicNotice();
+                  }
+                  serverEntries.forEach(function (e) {
+                    var n = normalize(e);
+                    if (n) urls[n.url] = true;
+                  });
+                  pending = pending.filter(function (e) {
+                    var n = normalize(e);
+                    return n && !urls[n.url];
+                  });
+                  savePending();
+                  renderCombined(serverEntries);
+                  applyMode();
+                  if (isAdmin) loadAdminData();
+                });
+            })
+            .catch(function () {
+              renderCombined(serverEntries);
+            });
+        }
+
+        function note(message, isError) {
+          formNote.textContent = message;
+          formNote.className = 'form-note' + (isError ? ' error' : '');
+        }
+
+        form.addEventListener('submit', function (e) {
+          e.preventDefault();
+          if (serverMode !== 'normal') {
+            note(
+              serverMode === 'off'
+                ? 'Marketplace is temporarily unavailable.'
+                : 'Marketplace is read-only right now.',
+              true
+            );
+            return;
+          }
+          var check = validateUrl(urlInput.value);
+          if (!check.ok) {
+            note(check.message, true);
+            return;
+          }
+          var desc = (descInput.value || '').trim().slice(0, 50);
+          var descBlocked = descFilterReason(desc);
+          if (descBlocked) {
+            note(descBlocked, true);
+            return;
+          }
+          var cat = selectedCategory;
+          pending.unshift({
+            url: check.url,
+            description: desc,
+            category: cat,
+            status: 'working',
+            submittedAt: new Date().toISOString(),
+          });
+          savePending();
+          refreshSharedList();
+          urlInput.value = '';
+          descInput.value = '';
+          setCategory('');
+          submitBtn.disabled = true;
+          note('Sending…', false);
+          api('/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: check.url, description: desc, category: cat }),
+          })
+            .then(function (response) {
+              if (response.ok) {
+                note('Submitted and listed for everyone.', false);
+                refreshSharedList();
+                return;
+              }
+              return response
+                .json()
+                .catch(function () {
+                  return null;
+                })
+                .then(function (data) {
+                  var serverMsg = data && data.error;
+                  if (response.status === 409)
+                    throw new Error(serverMsg || 'That URL is already listed.');
+                  if (response.status === 403)
+                    throw new Error(serverMsg || 'The marketplace is full (100 items).');
+                  if (response.status === 429)
+                    throw new Error(serverMsg || 'Slow down  -  rate limit reached.');
+                  throw new Error(
+                    serverMsg || 'Send failed (' + response.status + '). Please try again.'
+                  );
+                });
+            })
+            .catch(function (err) {
+              note((err && err.message) || 'Saved here, but the send failed.', true);
+            })
+            .then(function () {
+              submitBtn.disabled = serverMode !== 'normal';
+            });
+        });
+
+        urlList.addEventListener('click', function (e) {
+          // Marketplace links open normally (native anchor navigation).
+          // No cloaking / about:blank handling here by design.
+          var btn = e.target && e.target.getAttribute ? e.target : null;
+          if (!btn || btn.tagName !== 'BUTTON') {
+            btn = e.target && e.target.closest ? e.target.closest('button') : null;
+          }
+          if (!btn) return;
+          var id = btn.getAttribute('data-id');
+          if (btn.getAttribute('data-admin')) {
+            if (!isAdmin || !adminToken) return;
+            adminAction(btn.getAttribute('data-admin'), id, btn);
+            return;
+          }
+          if (btn.getAttribute('data-report')) {
+            if (!id || reported[String(id)]) return;
+            if (serverMode !== 'normal') return;
+            openReportModal(id);
+            return;
+          }
+          if (btn.getAttribute('data-react')) {
+            var type = btn.getAttribute('data-react');
+            if (!id) return;
+            if (serverMode !== 'normal') return;
+            var vid = String(id);
+            if (voting[vid]) return;
+            // Ignore unknown/retired reaction types from stale markup.
+            var known = false;
+            for (var ri = 0; ri < REACTIONS.length; ri++) {
+              if (REACTIONS[ri].key === type) {
+                known = true;
+                break;
+              }
+            }
+            if (!known) return;
+            var prev = voted[vid];
+            var prevConfirmed = confirmedVote[vid];
+            voting[vid] = true;
+            renderCombined(serverEntries);
+            if (prev === type) {
+              // Toggle off: clear your vote instantly; the server value still
+              // includes it until the remove lands, so the delta math in
+              // displayCount drops the count by one right away.
+              delete voted[vid];
+              savePending();
+              renderCombined(serverEntries);
+              api('/react', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  id: parseInt(id, 10),
+                  type: type,
+                  remove: true,
+                  voter: getVoterId(),
+                }),
+              })
+                .then(function (response) {
+                  if (!response.ok) throw new Error('remove failed');
+                  return response.json().catch(function () {
+                    return null;
+                  });
+                })
+                .then(function (data) {
+                  // Server no longer reflects any vote from us.
+                  delete confirmedVote[vid];
+                  if (data && data.entry) patchServerEntry(data.entry);
+                  savePending();
+                  renderCombined(serverEntries);
+                })
+                .catch(function () {
+                  // Remove failed: restore the vote instead of leaving a
+                  // phantom cleared state that never reaches the server.
+                  voted[vid] = prev;
+                  confirmedVote[vid] = prevConfirmed;
+                  savePending();
+                  renderCombined(serverEntries);
+                })
+                .then(function () {
+                  delete voting[vid];
+                  renderCombined(serverEntries);
+                });
+              return;
+            }
+            // New vote or switch: repaint instantly, sync in the background.
+            voted[vid] = type;
+            if (prev) {
+              delete reacted[vid + ':' + prev];
+            }
+            reacted[vid + ':' + type] = true;
+            savePending();
+            renderCombined(serverEntries);
+            api('/react', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                id: parseInt(id, 10),
+                type: type,
+                voter: getVoterId(),
+              }),
+            })
+              .then(function (response) {
+                return response
+                  .json()
+                  .catch(function () {
+                    return null;
+                  })
+                  .then(function (data) {
+                    if (response.status === 409) {
+                      // Server already holds this exact vote for us (e.g.
+                      // double-click / retry after the first request landed):
+                      // adopt it as synced so the optimistic +1 doesn't
+                      // double-count.
+                      confirmedVote[vid] = type;
+                      savePending();
+                      renderCombined(serverEntries);
+                      return null;
+                    }
+                    if (!response.ok || !data || !data.entry) throw new Error('react failed');
+                    return data.entry;
+                  });
+              })
+              .then(function (entry) {
+                if (!entry) return;
+                // The returned entry already includes our vote: adopt it as
+                // the new baseline so the optimistic +1 doesn't double-count.
+                patchServerEntry(entry);
+                confirmedVote[vid] = type;
+                savePending();
+                renderCombined(serverEntries);
+              })
+              .catch(function () {
+                // Vote failed: revert the optimistic change so a vote that was
+                // never recorded doesn't linger as if saved.
+                if (prev) {
+                  voted[vid] = prev;
+                } else {
+                  delete voted[vid];
+                }
+                delete reacted[vid + ':' + type];
+                if (prev) {
+                  reacted[vid + ':' + prev] = true;
+                }
+                savePending();
+                renderCombined(serverEntries);
+              })
+              .then(function () {
+                delete voting[vid];
+                renderCombined(serverEntries);
+              });
+            return;
+          }
+        });
+
+        // ---- Report modal (flags a URL for manual owner review) ----
+        var reportOverlay = document.getElementById('report-overlay');
+        var reportTarget = document.getElementById('report-target');
+        var reportReason = document.getElementById('report-reason');
+        var reportError = document.getElementById('report-error');
+        var reportSubmit = document.getElementById('report-submit');
+        document.getElementById('report-cancel').addEventListener('click', closeReportModal);
+        reportOverlay.addEventListener('click', function (e) {
+          if (e.target === reportOverlay) closeReportModal();
+        });
+        document.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape') {
+            closeReportModal();
+            var no = document.getElementById('admin-notice-overlay');
+            if (no) no.classList.remove('open');
+          }
+        });
+
+        function openReportModal(id) {
+          reportTargetId = id;
+          reportReason.value = '';
+          reportError.textContent = '';
+          reportSubmit.disabled = false;
+          reportTarget.textContent =
+            'Link #' + id + ' will be flagged with a needs-review label + comment on GitHub.';
+          reportOverlay.classList.add('open');
+          setTimeout(function () {
+            reportReason.focus();
+          }, 50);
+        }
+
+        function closeReportModal() {
+          reportOverlay.classList.remove('open');
+          reportTargetId = null;
+        }
+
+        reportSubmit.addEventListener('click', function () {
+          if (!reportTargetId) return;
+          if (serverMode !== 'normal') {
+            closeReportModal();
+            return;
+          }
+          var target = reportTargetId;
+          var rid = String(target);
+          if (reported[rid]) {
+            closeReportModal();
+            return;
+          }
+          var reason = (reportReason.value || '').trim().slice(0, 500);
+          // Optimistic: close + mark reported instantly, sync in the background.
+          reported[rid] = true;
+          savePending();
+          closeReportModal();
+          renderCombined(serverEntries);
+          api('/report', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: parseInt(target, 10), reason: reason }),
+          })
+            .then(function (response) {
+              if (response.status === 409) throw new Error('already');
+              if (!response.ok) throw new Error('Report failed. Try again.');
+              refreshSharedList();
+            })
+            .catch(function (err) {
+              // Revert the optimistic mark and reopen so the user can retry.
+              delete reported[rid];
+              savePending();
+              renderCombined(serverEntries);
+              openReportModal(target);
+              reportError.textContent =
+                err && err.message && err.message !== 'already'
+                  ? err.message
+                  : 'Report failed  -  check connection and retry.';
+            });
+        });
+
+        // ---- Admin panel (Ctrl+Alt+A; enforced worker-side, UI only here) ----
+        var adminBar = document.getElementById('admin-bar');
+        var adminLoginOverlay = document.getElementById('admin-login-overlay');
+        var adminUserInput = document.getElementById('admin-user');
+        var adminPassInput = document.getElementById('admin-pass');
+        var adminLoginError = document.getElementById('admin-login-error');
+        var adminLoginSubmit = document.getElementById('admin-login-submit');
+
+        function openAdminLogin() {
+          adminUserInput.value = '';
+          adminPassInput.value = '';
+          adminLoginError.textContent = '';
+          adminLoginSubmit.disabled = false;
+          adminLoginOverlay.classList.add('open');
+          setTimeout(function () {
+            adminUserInput.focus();
+          }, 50);
+        }
+
+        function closeAdminLogin() {
+          adminLoginOverlay.classList.remove('open');
+        }
+
+        document.getElementById('admin-login-cancel').addEventListener('click', closeAdminLogin);
+
+        adminLoginOverlay.addEventListener('click', function (e) {
+          if (e.target === adminLoginOverlay) closeAdminLogin();
+        });
+
+        function setAdmin(on) {
+          isAdmin = on;
+          if (on) adminBar.classList.add('open');
+          else {
+            adminBar.classList.remove('open');
+            adminView = 'all';
+          }
+          applyMode();
+          renderCombined(serverEntries);
+        }
+
+        function adminHeaders() {
+          return { 'Content-Type': 'application/json', Authorization: 'Bearer ' + adminToken };
+        }
+
+        function loadAdminData() {
+          if (!isAdmin || !adminToken) return;
+          apiAuth('/admin/reports', {})
+            .then(function (res) {
+              return res.json().catch(function () {
+                return null;
+              });
+            })
+            .then(function (data) {
+              reportedIds = {};
+              ((data && data.entries) || []).forEach(function (e) {
+                if (e && e.id != null) reportedIds[String(e.id)] = true;
+              });
+              var n = Object.keys(reportedIds).length;
+              document.getElementById('admin-report-count').textContent = n ? ' (' + n + ')' : '';
+              renderCombined(serverEntries);
+            })
+            .catch(function () {});
+          apiAuth('/admin/list', {})
+            .then(function (res) {
+              if (res.status === 401) {
+                adminLogout();
+                return null;
+              }
+              return res.json().catch(function () {
+                return null;
+              });
+            })
+            .then(function (data) {
+              if (!data) return;
+              if (data.mode) {
+                serverMode = data.mode;
+                applyMode();
+              }
+              closedEntries = ((data && data.entries) || []).filter(function (e) {
+                return e && e.closed;
+              });
+              renderCombined(serverEntries);
+            })
+            .catch(function () {});
+          apiAuth('/admin/notice', {})
+            .then(function (res) {
+              if (res.status === 401) {
+                adminLogout();
+                return null;
+              }
+              return res.json().catch(function () {
+                return null;
+              });
+            })
+            .then(function (data) {
+              if (data && data.notice) {
+                adminNotice = data.notice;
+                var t = document.getElementById('admin-notice-text');
+                var v = document.getElementById('admin-notice-visible');
+                if (t && document.activeElement !== t) t.value = adminNotice.text || '';
+                if (v) v.checked = !!adminNotice.visible;
+                updateNoticeBtn();
+              }
+            })
+            .catch(function () {});
+        }
+
+        function updateNoticeBtn() {
+          var b = document.getElementById('admin-notice-btn');
+          if (!b) return;
+          b.textContent =
+            adminNotice && adminNotice.visible && adminNotice.text
+              ? '📢 Notice (on)'
+              : '📢 Notice';
+        }
+
+        // ---- Admin info-banner editor (edit text, show/hide) ----
+        var adminNoticeOverlay = document.getElementById('admin-notice-overlay');
+        var adminNoticeText = document.getElementById('admin-notice-text');
+        var adminNoticeVisible = document.getElementById('admin-notice-visible');
+        var adminNoticeError = document.getElementById('admin-notice-error');
+        var adminNoticeSave = document.getElementById('admin-notice-save');
+
+        function openNoticeEditor() {
+          if (!isAdmin) return;
+          adminNoticeText.value = (adminNotice && adminNotice.text) || '';
+          adminNoticeVisible.checked = !!(adminNotice && adminNotice.visible);
+          adminNoticeError.textContent = '';
+          adminNoticeSave.disabled = false;
+          adminNoticeOverlay.classList.add('open');
+          setTimeout(function () {
+            adminNoticeText.focus();
+          }, 50);
+        }
+
+        function closeNoticeEditor() {
+          adminNoticeOverlay.classList.remove('open');
+        }
+
+        document.getElementById('admin-notice-btn').addEventListener('click', openNoticeEditor);
+        document.getElementById('admin-notice-cancel').addEventListener('click', closeNoticeEditor);
+        adminNoticeOverlay.addEventListener('click', function (e) {
+          if (e.target === adminNoticeOverlay) closeNoticeEditor();
+        });
+
+        adminNoticeSave.addEventListener('click', function () {
+          if (!isAdmin || !adminToken) return;
+          var text = (adminNoticeText.value || '').trim().slice(0, 500);
+          var visible = adminNoticeVisible.checked && text.length > 0;
+          adminNoticeSave.disabled = true;
+          adminNoticeError.textContent = '';
+          api('/admin/notice', {
+            method: 'POST',
+            headers: adminHeaders(),
+            body: JSON.stringify({ text: text, visible: visible }),
+          })
+            .then(function (res) {
+              return res
+                .json()
+                .catch(function () {
+                  return null;
+                })
+                .then(function (data) {
+                  if (res.status === 401) {
+                    adminLogout();
+                    throw new Error('Session expired.');
+                  }
+                  if (res.status === 404) {
+                    throw new Error(
+                      'Worker is outdated — redeploy it with `wrangler deploy` in /worker, then retry.'
+                    );
+                  }
+                  if (!res.ok || !data || !data.notice) {
+                    throw new Error((data && data.error) || 'Save failed.');
+                  }
+                  return data.notice;
+                });
+            })
+            .then(function (notice) {
+              adminNotice = notice;
+              updateNoticeBtn();
+              closeNoticeEditor();
+              // Clear a stale local dismissal so the new banner shows for you too.
+              try {
+                sessionStorage.removeItem('marketplace_notice_dismissed');
+              } catch (err) {}
+              refreshSharedList();
+            })
+            .catch(function (err) {
+              adminNoticeError.textContent = (err && err.message) || 'Save failed.';
+              adminNoticeSave.disabled = false;
+            });
+        });
+
+        function adminAction(action, id, btn) {
+          if (!id) return;
+          var numId = parseInt(id, 10);
+          if (
+            action === 'remove' &&
+            !window.confirm('Remove this URL? It will disappear from the marketplace.')
+          )
+            return;
+          if (action === 'status:blocked' && !window.confirm('Mark this URL as blocked?')) return;
+          if (btn) btn.disabled = true;
+          var path, body;
+          if (action === 'status:working' || action === 'status:blocked') {
+            path = '/admin/status';
+            body = { id: numId, status: action.split(':')[1] };
+          } else if (action === 'remove') {
+            path = '/admin/remove';
+            body = { id: numId };
+          } else if (action === 'restore') {
+            path = '/admin/remove';
+            body = { id: numId, reopen: true };
+          } else if (action === 'clear') {
+            path = '/admin/clear-report';
+            body = { id: numId };
+          } else {
+            if (btn) btn.disabled = false;
+            return;
+          }
+          api(path, { method: 'POST', headers: adminHeaders(), body: JSON.stringify(body) })
+            .then(function (res) {
+              if (res.status === 401) {
+                adminLogout();
+                throw new Error('Session expired.');
+              }
+              if (!res.ok) throw new Error('Admin action failed.');
+              loadAdminData();
+              refreshSharedList();
+            })
+            .catch(function () {
+              loadAdminData();
+              refreshSharedList();
+            });
+        }
+
+        function adminLogout() {
+          adminToken = null;
+          try {
+            sessionStorage.removeItem('marketplace_admin');
+          } catch (err) {}
+          reportedIds = {};
+          closedEntries = [];
+          adminNotice = { text: '', visible: false, updatedAt: 0 };
+          updateNoticeBtn();
+          document.getElementById('admin-report-count').textContent = '';
+          setAdmin(false);
+        }
+
+        document.getElementById('admin-logout').addEventListener('click', adminLogout);
+
+        adminBar.addEventListener('click', function (e) {
+          var btn = e.target && e.target.closest ? e.target.closest('button') : null;
+          if (!btn || !isAdmin) return;
+          var mode = btn.getAttribute('data-mode');
+          var view = btn.getAttribute('data-view');
+          if (mode) {
+            if (
+              mode === 'off' &&
+              !window.confirm(
+                'Shut down the whole marketplace? Users will see an unavailable notice.'
+              )
+            )
+              return;
+            api('/admin/mode', {
+              method: 'POST',
+              headers: adminHeaders(),
+              body: JSON.stringify({ mode: mode }),
+            })
+              .then(function (res) {
+                if (res.status === 401) {
+                  adminLogout();
+                  return;
+                }
+                return res.json().catch(function () {
+                  return null;
+                });
+              })
+              .then(function (data) {
+                if (data && data.mode) serverMode = data.mode;
+                applyMode();
+                refreshSharedList();
+              })
+              .catch(function () {
+                refreshSharedList();
+              });
+            return;
+          }
+          if (view) {
+            adminView = view;
+            applyMode();
+            renderCombined(serverEntries);
+            if (view === 'removed' || view === 'reports') loadAdminData();
+          }
+        });
+
+        // Category picker: single-select, click again to clear.
+        function setCategory(cat) {
+          selectedCategory = CATEGORY_ICONS[cat] ? cat : '';
+          var btns = document.querySelectorAll('.cat-btn');
+          for (var i = 0; i < btns.length; i++) {
+            if (btns[i].getAttribute('data-cat') === selectedCategory) btns[i].classList.add('active');
+            else btns[i].classList.remove('active');
+          }
+        }
+
+        document.querySelectorAll('.cat-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var cat = btn.getAttribute('data-cat');
+            setCategory(cat === selectedCategory ? '' : cat);
+          });
+        });
+
+        // Sort button handlers
+        document.querySelectorAll('.sort-btn').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var newSort = btn.getAttribute('data-sort');
+            sortBy = newSort;
+            // Update active state
+            document.querySelectorAll('.sort-btn').forEach(function (b) {
+              b.classList.remove('active');
+            });
+            btn.classList.add('active');
+            refreshSharedList();
+          });
+        });
+
+        document.getElementById('admin-login-form').addEventListener('submit', function (e) {
+          e.preventDefault();
+          var user = (adminUserInput.value || '').trim();
+          var pass = adminPassInput.value || '';
+          if (!user || !pass) {
+            adminLoginError.textContent = 'Enter both username and password.';
+            return;
+          }
+          adminLoginSubmit.disabled = true;
+          adminLoginError.textContent = '';
+          api('/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: user, pass: pass }),
+          })
+            .then(function (res) {
+              return res
+                .json()
+                .catch(function () {
+                  return null;
+                })
+                .then(function (data) {
+                  if (res.status === 501)
+                    throw new Error('Admin panel is not configured on the server.');
+                  if (res.status === 429) throw new Error('Too many attempts. Try again later.');
+                  if (!res.ok || !data || !data.token) throw new Error('Invalid credentials.');
+                  return data.token;
+                });
+            })
+            .then(function (token) {
+              adminToken = token;
+              try {
+                sessionStorage.setItem('marketplace_admin', token);
+              } catch (err) {}
+              closeAdminLogin();
+              setAdmin(true);
+              loadAdminData();
+              refreshSharedList();
+            })
+            .catch(function (err) {
+              adminLoginError.textContent = (err && err.message) || 'Login failed.';
+              adminLoginSubmit.disabled = false;
+            });
+        });
+
+        // Hidden keybind: Ctrl+K opens admin login (skipped while typing).
+        document.addEventListener('keydown', function (e) {
+          var tag = e.target && e.target.tagName;
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+          if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key === 'k') {
+            e.preventDefault();
+            if (!isAdmin) openAdminLogin();
+          }
+        });
+
+        // Resume admin session if a token survived in this tab.
+        if (adminToken) {
+          apiAuth('/admin/reports', {})
+            .then(function (res) {
+              if (res.status === 401) throw new Error('expired');
+              return res.json().catch(function () {
+                return null;
+              });
+            })
+            .then(function () {
+              setAdmin(true);
+              loadAdminData();
+            })
+            .catch(function () {
+              adminToken = null;
+              try {
+                sessionStorage.removeItem('marketplace_admin');
+              } catch (err) {}
+            });
+        }
+
+        // ---- First-visit TOS gate (same storage keys + file as the main site,
+        // so agreeing on one page covers the other until expiry/revision) ----
+        function tosHash(text) {
+          // FNV-1a over the FULL text (must match src/ui/index.ts
+          // computeTOSHash: both pages share the tosHash storage keys).
+          var t = String(text);
+          var hash = 0x811c9dc5;
+          for (var i = 0; i < t.length; i++) {
+            hash ^= t.charCodeAt(i);
+            hash = Math.imul(hash, 0x01000193);
+          }
+          return (hash >>> 0).toString(36) + ':' + t.length;
+        }
+
+        function renderTosText(container, text) {
+          // textContent, never innerHTML: fetched text must not parse as HTML.
+          while (container.firstChild) container.removeChild(container.firstChild);
+          var pre = document.createElement('pre');
+          pre.setAttribute(
+            'style',
+            'color:var(--text-secondary);font-size:.875rem;line-height:1.6;white-space:pre-wrap;word-break:break-word;'
+          );
+          pre.textContent = String(text);
+          container.appendChild(pre);
+        }
+
+        function closeTOSGate() {
+          var modal = document.getElementById('tos-modal');
+          if (modal) modal.classList.remove('open');
+        }
+
+        function showTOSGate() {
+          var modal = document.getElementById('tos-modal');
+          if (!modal) return;
+          fetch('terms_of_service.txt')
+            .then(function (res) {
+              if (!res.ok) throw new Error('TOS fetch failed');
+              return res.text();
+            })
+            .then(function (currentText) {
+              var currentHash = tosHash(currentText);
+              var tosAgreed = null,
+                tosTimestamp = null,
+                storedHash = null;
+              try {
+                tosAgreed = localStorage.getItem('tosAgreed');
+                tosTimestamp = localStorage.getItem('tosAgreedTimestamp');
+                storedHash = localStorage.getItem('tosHash');
+              } catch (err) {}
+              var SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+              if (
+                tosAgreed &&
+                tosTimestamp &&
+                storedHash &&
+                Date.now() - parseInt(tosTimestamp, 10) < SEVEN_DAYS &&
+                storedHash === currentHash
+              ) {
+                closeTOSGate();
+              } else {
+                // Locking gate: backdrop clicks are swallowed, like the main site.
+                modal.classList.add('open');
+                modal.onclick = function (e) {
+                  e.stopPropagation();
+                };
+              }
+              var container = document.getElementById('tos-content');
+              if (container) {
+                renderTosText(container, currentText);
+              }
+            })
+            .catch(function () {
+              var container = document.getElementById('tos-content');
+              if (container) {
+                container.textContent = 'Terms of Service agreement not available.';
+              }
+              var m = document.getElementById('tos-modal');
+              if (m) m.classList.add('open');
+            });
+        }
+
+        document.getElementById('tos-agree').addEventListener('click', function () {
+          fetch('terms_of_service.txt')
+            .then(function (res) {
+              if (!res.ok) throw new Error('TOS fetch failed');
+              return res.text();
+            })
+            .then(function (text) {
+              try {
+                localStorage.setItem('tosAgreed', '1');
+                localStorage.setItem('tosAgreedTimestamp', Date.now().toString());
+                localStorage.setItem('tosHash', tosHash(text));
+              } catch (err) {}
+              closeTOSGate();
+            })
+            .catch(function () {
+              try {
+                localStorage.setItem('tosAgreed', '1');
+                localStorage.setItem('tosAgreedTimestamp', Date.now().toString());
+                localStorage.setItem('tosHash', '0');
+              } catch (err) {}
+              closeTOSGate();
+            });
+        });
+        document.getElementById('tos-decline').addEventListener('click', function () {
+          window.close();
+        });
+
+        showTOSGate();
+        refreshSharedList();
+      })();
+    </script>
+  </body>
+</html>

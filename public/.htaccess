@@ -1,0 +1,28 @@
+# Security headers (GitHub Pages ignores .htaccess, but Apache/self-hosted
+# deployments get baseline hardening; meta CSP in index.html covers Pages).
+<IfModule mod_headers.c>
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+</IfModule>
+
+# Cache control for background image
+<filesMatch "background.jpg">
+  ExpiresActive On
+  ExpiresDefault "access plus 30 days"
+  Header append Cache-Control "public"
+</filesMatch>
+
+# HTML pages (index.html, urls.html, sw.js) must revalidate: stale HTML is how
+# removed features kept running on returning visitors until they cleared data.
+<filesMatch "\.(html|json|txt)$">
+  Header set Cache-Control "no-cache, must-revalidate"
+</filesMatch>
+
+# Cache control for all static assets
+<filesMatch "\.(jpg|jpeg|png|svg|gif|webp|ico|css|js)$">
+  ExpiresActive On
+  ExpiresDefault "access plus 30 days"
+  Header set Cache-Control "public, max-age=2592000"
+</filesMatch>
