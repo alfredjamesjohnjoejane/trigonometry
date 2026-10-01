@@ -9,6 +9,7 @@ import { loadGames } from './games/index.js';
 import {
   updateOnlineStatus,
   checkPWAInstallAvailability,
+  enforcePWAOverlay,
   setRandomLandingText,
   showTOSPopup,
   initHomepageTest,
@@ -54,8 +55,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (msg) msg.style.display = 'block';
     setDeferredPrompt(null);
     showErrorToast('App installed!');
+    // Hide the enforcement overlay on next load
+    const overlay = document.getElementById('pwa-enforce-overlay');
+    if (overlay) overlay.style.display = 'none';
   });
 
+  enforcePWAOverlay();
   checkPWAInstallAvailability();
   setRandomLandingText();
   showTOSPopup();

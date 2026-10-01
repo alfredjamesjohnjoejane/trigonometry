@@ -718,10 +718,89 @@ function installPWA(): void {
   }
 }
 
-function checkPWAInstallAvailability(): void {
-  const isStandalone =
+function isStandaloneMode(): boolean {
+  return (
     window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as unknown as { standalone?: boolean }).standalone;
+    window.matchMedia('(display-mode: fullscreen)').matches ||
+    window.matchMedia('(display-mode: minimal-ui)').matches ||
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true
+  );
+}
+
+function enforcePWAOverlay(): void {
+  const overlay = document.getElementById('pwa-enforce-overlay');
+  if (!overlay) return;
+
+  if (isStandaloneMode()) {
+    overlay.style.display = 'none';
+    return;
+  }
+
+  // Not standalone — block the app
+  overlay.style.display = 'flex';
+
+  // Detect iOS
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const iosEl = document.getElementById('pwa-enforce-ios');
+  const installBtn = document.getElementById('pwa-enforce-install-btn') as HTMLButtonElement | null;
+
+  if (isIOS && iosEl) {
+    iosEl.style.display = 'block';
+    if (installBtn) installBtn.style.display = 'none';
+  } else if (iosEl) {
+    iosEl.style.display = 'none';
+  }
+
+  // Try to trigger install prompt automatically
+  const prompt = getDeferredPrompt();
+  if (prompt && installBtn) {
+    installBtn.onclick = () => {
+      try {
+        (prompt as unknown as { prompt: () => void }).prompt();
+      } catch {
+        const errEl = document.getElementById('pwa-enforce-error');
+        if (errEl) {
+          errEl.textContent = 'Install failed. Use browser menu (⋮) → Install app.';
+          errEl.style.display = 'block';
+        }
+      }
+    };
+  }
+
+  // === STRICT ENFORCEMENT LAYERS ===
+
+  // Layer 1: MutationObserver — re-show overlay if anyone tries to hide it
+  const observer = new MutationObserver(() => {
+    if (!isStandaloneMode() && overlay.style.display !== 'flex') {
+      overlay.style.display = 'flex';
+    }
+  });
+  observer.observe(overlay, { attributes: true, attributeFilter: ['style', 'class'] });
+
+  // Layer 2: Visual blocker — a pseudo-element that covers the overlay
+  // and prevents interaction with anything beneath it
+  const style = document.createElement('style');
+  style.textContent = `
+    #pwa-enforce-overlay::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      z-index: 999998;
+      background: transparent;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Layer 3: Resize listener — re-check standalone mode on resize
+  window.addEventListener('resize', () => {
+    if (!isStandaloneMode()) {
+      overlay.style.display = 'flex';
+    }
+  });
+}
+
+function checkPWAInstallAvailability(): void {
+  const isStandalone = isStandaloneMode();
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const btn = document.getElementById('pwa-install-btn');
   const msg = document.getElementById('pwa-installed-msg');
@@ -840,6 +919,8 @@ export {
   initViewFromHash,
   installPWA,
   checkPWAInstallAvailability,
+  enforcePWAOverlay,
+  isStandaloneMode,
   updateOnlineStatus,
   setDeferredPrompt,
 };
