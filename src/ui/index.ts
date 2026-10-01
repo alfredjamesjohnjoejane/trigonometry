@@ -722,6 +722,8 @@ function isStandaloneMode(): boolean {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
     window.matchMedia('(display-mode: fullscreen)').matches ||
+    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
+    window.matchMedia('(display-mode: tabbed)').matches ||
     (window.navigator as unknown as { standalone?: boolean }).standalone === true
   );
 }
