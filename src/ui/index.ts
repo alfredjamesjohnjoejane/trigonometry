@@ -722,7 +722,6 @@ function isStandaloneMode(): boolean {
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
     window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.matchMedia('(display-mode: minimal-ui)').matches ||
     (window.navigator as unknown as { standalone?: boolean }).standalone === true
   );
 }
@@ -732,11 +731,13 @@ function enforcePWAOverlay(): void {
   if (!overlay) return;
 
   if (isStandaloneMode()) {
+    // Running as installed PWA — hide the enforcement overlay
     overlay.style.display = 'none';
     return;
   }
 
-  // Not standalone — block the app
+  // Not standalone — ensure overlay is visible (it's visible by default in HTML,
+  // but this handles cases where something else hid it)
   overlay.style.display = 'flex';
 
   // Detect iOS
@@ -769,24 +770,38 @@ function enforcePWAOverlay(): void {
 
   // === STRICT ENFORCEMENT LAYERS ===
 
-  // Layer 1: MutationObserver — re-show overlay if anyone tries to hide it
-  const observer = new MutationObserver(() => {
-    if (!isStandaloneMode() && overlay.style.display !== 'flex') {
-      overlay.style.display = 'flex';
+  // Layer 1: MutationObserver — re-show overlay if anyone tries to hide/remove it
+  const observer = new MutationObserver((mutations) => {
+    if (!isStandaloneMode()) {
+      // Check if overlay was hidden or removed
+      const isHidden = overlay.style.display === 'none' || overlay.style.visibility === 'hidden' || overlay.style.opacity === '0';
+      const isRemoved = !document.body.contains(overlay);
+      
+      if (isHidden || isRemoved) {
+        // Re-attach if removed
+        if (isRemoved) {
+          document.body.appendChild(overlay);
+        }
+        // Force show
+        overlay.style.display = 'flex';
+        overlay.style.visibility = 'visible';
+        overlay.style.opacity = '1';
+        overlay.style.zIndex = '999999';
+      }
     }
   });
   observer.observe(overlay, { attributes: true, attributeFilter: ['style', 'class'] });
+  observer.observe(document.body, { childList: true, subtree: true });
 
-  // Layer 2: Visual blocker — a pseudo-element that covers the overlay
-  // and prevents interaction with anything beneath it
+  // Layer 2: Visual blocker — ensure overlay stays on top and blocks interaction
+  // The HTML already has z-index: 999999, but add a style to prevent any z-index conflicts
   const style = document.createElement('style');
   style.textContent = `
-    #pwa-enforce-overlay::after {
-      content: '';
-      position: fixed;
-      inset: 0;
-      z-index: 999998;
-      background: transparent;
+    #pwa-enforce-overlay {
+      z-index: 999999 !important;
+    }
+    #pwa-enforce-overlay * {
+      pointer-events: auto !important;
     }
   `;
   document.head.appendChild(style);
@@ -795,8 +810,27 @@ function enforcePWAOverlay(): void {
   window.addEventListener('resize', () => {
     if (!isStandaloneMode()) {
       overlay.style.display = 'flex';
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+    } else {
+      overlay.style.display = 'none';
     }
   });
+
+  // Layer 4: Periodic check — catch any edge cases (tab restore, etc.)
+  const interval = setInterval(() => {
+    if (!isStandaloneMode()) {
+      overlay.style.display = 'flex';
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+      if (!document.body.contains(overlay)) {
+        document.body.appendChild(overlay);
+      }
+    } else {
+      overlay.style.display = 'none';
+      clearInterval(interval);
+    }
+  }, 2000);
 }
 
 function checkPWAInstallAvailability(): void {

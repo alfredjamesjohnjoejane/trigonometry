@@ -1892,7 +1892,9 @@
 
 
   <!-- STRICT PWA ENFORCEMENT OVERLAY -->
-  <div id="pwa-enforce-overlay" style="display:none;position:fixed;inset:0;z-index:999999;background:#111;flex-direction:column;align-items:center;justify-content:center;padding:2rem;font-family:'Segoe UI',system-ui,sans-serif;color:var(--text-primary);text-align:center">
+  <!-- Visible by default (no display:none) so it blocks access even if JS fails/disabled.
+       JS will hide it only when running in standalone/PWA mode. -->
+  <div id="pwa-enforce-overlay" style="position:fixed;inset:0;z-index:999999;background:#111;flex-direction:column;align-items:center;justify-content:center;padding:2rem;font-family:'Segoe UI',system-ui,sans-serif;color:var(--text-primary);text-align:center;display:flex;">
     <div style="max-width:480px;width:100%">
       <div style="font-size:4rem;margin-bottom:1.5rem">📱</div>
       <h1 style="font-size:2rem;font-weight:800;margin-bottom:1rem;color:var(--text-primary)">Install Jesherhead</h1>
@@ -1904,6 +1906,19 @@
       <div id="pwa-enforce-error" style="display:none;margin-top:1rem;padding:12px 16px;background:rgba(255,107,107,.1);border:1px solid rgba(255,107,107,.2);border-radius:12px;color:#ff6b6b;font-size:.875rem"></div>
     </div>
   </div>
+  <!-- Fallback if JS is disabled: overlay stays visible, blocking access -->
+  <noscript>
+    <style>
+      #pwa-enforce-overlay { display: flex !important; }
+    </style>
+    <div style="position:fixed;inset:0;z-index:1000000;background:#111;display:flex;align-items:center;justify-content:center;padding:2rem;text-align:center;color:#e0e0e0;font-family:system-ui,sans-serif;">
+      <div style="max-width:480px">
+        <h1 style="font-size:2rem;margin-bottom:1rem">JavaScript Required</h1>
+        <p style="color:#888;line-height:1.6;margin-bottom:1.5rem">This app requires JavaScript to run. Please enable JavaScript in your browser settings, then reload the page.</p>
+        <p style="color:#888;font-size:.9rem">If JavaScript is enabled and you see this message, the app scripts may be blocked by an extension or network policy.</p>
+      </div>
+    </div>
+  </noscript>
 
   <!-- LANDING PAGE -->
   <div id="lp">

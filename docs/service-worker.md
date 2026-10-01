@@ -127,13 +127,65 @@ self.addEventListener('message', (event) => {
 
 ```ts
 const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
+                     window.matchMedia('(display-mode: fullscreen)').matches ||
                      window.navigator.standalone;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
 ```
 
-- **Standalone mode**: Shows "Added to home screen" message
+- **Standalone mode**: Shows "Added to home screen" message, hides enforcement overlay
 - **iOS**: Hides install button (iOS doesn't support `beforeinstallprompt`; user must use Share → Add to Home Screen)
 - **Other**: Shows install button when `beforeinstallprompt` fires
+
+### PWA Enforcement Overlay
+
+**File**: `index.html` (overlay markup) + `src/ui/index.ts` (`enforcePWAOverlay`)
+
+The app enforces installation as a PWA — it cannot be used in a regular browser tab.
+
+#### Overlay Behavior
+
+1. **Visible by default** in HTML (`display: flex`) — blocks access even if JS fails or is disabled
+2. **`<noscript>` fallback** — reinforces overlay visibility and shows "JavaScript Required" message
+3. **JS hides overlay** only when `isStandaloneMode()` returns true
+
+#### `isStandaloneMode()` Detection
+
+```ts
+function isStandaloneMode(): boolean {
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    window.matchMedia('(display-mode: fullscreen)').matches ||
+    navigator.standalone === true  // iOS
+  );
+}
+```
+
+- `display-mode: standalone` — Standard PWA install (Chrome, Edge, Firefox, Safari on macOS)
+- `display-mode: fullscreen` — Fullscreen PWA mode (rare, but valid)
+- `navigator.standalone` — iOS home screen app (legacy, but still used)
+
+#### Strict Enforcement Layers
+
+1. **MutationObserver** — Watches overlay for `style`/`class` changes AND watches `document.body` for childList changes (catches removal). Re-attaches and re-shows overlay if hidden/removed.
+
+2. **CSS z-index lock** — Injects `!important` z-index to keep overlay above everything.
+
+3. **Resize listener** — Re-checks standalone mode on window resize.
+
+4. **Periodic check (2s interval)** — Catches edge cases like session restore, back-forward cache, etc. Auto-clears when standalone mode detected.
+
+#### Install Flow from Overlay
+
+1. User clicks "Install App" button (Android/Chrome/Edge)
+2. `beforeinstallprompt` captured earlier → `prompt.prompt()` called
+3. Browser shows native install dialog
+4. On `appinstalled` event: overlay hidden, toast shown, page reloads in standalone mode
+
+#### iOS Handling
+
+- Install button hidden (native prompt not supported)
+- Instructions shown: "Tap Share → Add to Home Screen"
+- `navigator.standalone` detects iOS home screen launch
 
 ### Offline Page
 
