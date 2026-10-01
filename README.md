@@ -74,6 +74,12 @@ git push origin main
 
 ---
 
+## CI/CD
+
+Every push to `main` or `dev` (and pull requests targeting them) triggers GitHub Actions workflows for linting, type checking, tests, and builds. Pushes to `main` also trigger a deployment to GitHub Pages.
+
+---
+
 ## Notes on Repository Visibility
 
 By default, GitHub Pages on a free account requires the repository to be **public** in order to publish a site. If you set the repository to private, Pages will be disabled unless you are on a GitHub Pro or Team plan.
