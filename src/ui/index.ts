@@ -771,12 +771,15 @@ function enforcePWAOverlay(): void {
   // === STRICT ENFORCEMENT LAYERS ===
 
   // Layer 1: MutationObserver — re-show overlay if anyone tries to hide/remove it
-  const observer = new MutationObserver((mutations) => {
+  const observer = new MutationObserver(_mutations => {
     if (!isStandaloneMode()) {
       // Check if overlay was hidden or removed
-      const isHidden = overlay.style.display === 'none' || overlay.style.visibility === 'hidden' || overlay.style.opacity === '0';
+      const isHidden =
+        overlay.style.display === 'none' ||
+        overlay.style.visibility === 'hidden' ||
+        overlay.style.opacity === '0';
       const isRemoved = !document.body.contains(overlay);
-      
+
       if (isHidden || isRemoved) {
         // Re-attach if removed
         if (isRemoved) {
