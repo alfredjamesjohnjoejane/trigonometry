@@ -756,13 +756,6 @@ function markAppInstalled(): void {
   ST.set('pwaInstalled', '1');
 }
 
-function markAppInstalledAndHide(): void {
-  console.log('[PWA] Manual markAppInstalledAndHide called');
-  markAppInstalled();
-  const overlay = document.getElementById('pwa-enforce-overlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
 function enforcePWAOverlay(): void {
   const overlay = document.getElementById('pwa-enforce-overlay');
   if (!overlay) return;
@@ -786,18 +779,6 @@ function enforcePWAOverlay(): void {
     if (installBtn) installBtn.style.display = 'none';
   } else if (iosEl) {
     iosEl.style.display = 'none';
-  }
-
-  // Show "I've Already Installed It" button after 10 seconds as fallback
-  const manualBtn = document.getElementById(
-    'pwa-enforce-installed-btn'
-  ) as HTMLButtonElement | null;
-  if (manualBtn) {
-    setTimeout(() => {
-      if (!isStandaloneMode() && !isAppInstalled()) {
-        manualBtn.style.display = 'block';
-      }
-    }, 10000);
   }
 
   // === STRICT ENFORCEMENT LAYERS ===
@@ -963,7 +944,6 @@ function openCloak(): void {
 (window as unknown as Record<string, unknown>).initViewFromHash = initViewFromHash;
 (window as unknown as Record<string, unknown>).startPlayTimer = startPlayTimer;
 (window as unknown as Record<string, unknown>).setDeferredPrompt = setDeferredPrompt;
-(window as unknown as Record<string, unknown>).markAppInstalledAndHide = markAppInstalledAndHide;
 
 export {
   setRandomLandingText,
@@ -994,7 +974,6 @@ export {
   isStandaloneMode,
   isAppInstalled,
   markAppInstalled,
-  markAppInstalledAndHide,
   updateOnlineStatus,
   setDeferredPrompt,
 };
