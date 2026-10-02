@@ -828,8 +828,9 @@ function markInstalled(): void {
 
 type PWAEnforcement = { observer: MutationObserver; interval: ReturnType<typeof setInterval> };
 
-// Active only while the gate is up. Cleared the moment the app is installed
-// so enforcement can never fight the dismissal.
+// Active only while the gate is up. Cleared once the app runs standalone
+// (force-PWA: an install in a regular browser tab keeps the "Open App" gate
+// up, so enforcement must stay active there).
 let pwaEnforcement: PWAEnforcement | null = null;
 
 function stopPWAEnforcement(): void {
@@ -844,31 +845,68 @@ function stopPWAEnforcement(): void {
 }
 
 /**
- * Single source of truth for "the app is installed": hides the install gate
- * (and the install button) and stops enforcement. Idempotent, safe to call
- * from every install signal — boot, `appinstalled`, an accepted `userChoice`,
- * a focus/visibility re-check, or the periodic watchdog.
+ * Single source of truth for the PWA gate (force-PWA, three states):
+ * - standalone: hide the gate, stop enforcement (user is in the installed app)
+ * - installed but not standalone: keep the gate up with the "open from home
+ *   screen" message, keep enforcing (browser usage is not allowed)
+ * - not installed: leave the gate to enforcePWAOverlay/checkPWAInstallAvailability.
+ * Idempotent, safe to call from every install signal — boot, `appinstalled`,
+ * an accepted `userChoice`, a focus/visibility re-check, or the watchdog.
  */
 function syncPWAInstallUI(): void {
-  // Only hide the overlay when actually running in standalone mode.
-  // If installed but in a browser tab, keep the overlay visible with
-  // the "open from home screen" message.
-  if (!isStandaloneMode()) return;
+  if (isStandaloneMode()) {
+    // A standalone launch proves the app is installed. Persist it: the browser
+    // tab shares this storage, so opening the installed app once also flips
+    // browser tabs into the "Open App" state (their `appinstalled` event may
+    // have been missed entirely).
+    if (!isAppInstalled()) markAppInstalled();
 
-  // A standalone launch proves the app is installed. Persist it: the browser
-  // tab shares this storage, so opening the installed app once also unlocks
-  // the tab that is still showing the gate (its `appinstalled` event may have
-  // been missed entirely).
-  if (!isAppInstalled()) markAppInstalled();
+    stopPWAEnforcement();
 
-  stopPWAEnforcement();
+    const overlay = document.getElementById('pwa-enforce-overlay');
+    if (overlay) {
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+      overlay.style.display = 'none';
+    }
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'none';
+    const msg = document.getElementById('pwa-installed-msg');
+    if (msg) msg.style.display = 'block';
+    return;
+  }
 
+  if (isAppInstalled()) {
+    // Installed but in a regular browser tab — force PWA usage.
+    showOpenAppGate();
+    return;
+  }
+}
+
+/** Shows the "Open Jesherhead App" gate for installed-but-not-standalone. */
+function showOpenAppGate(): void {
   const overlay = document.getElementById('pwa-enforce-overlay');
   if (overlay) {
+    overlay.style.display = 'flex';
     overlay.style.visibility = 'visible';
     overlay.style.opacity = '1';
-    overlay.style.display = 'none';
+
+    const titleEl = document.getElementById('pwa-enforce-title');
+    if (titleEl) titleEl.textContent = 'Open Jesherhead App';
+    const descEl = document.getElementById('pwa-enforce-desc');
+    if (descEl)
+      descEl.textContent =
+        'Please open the Jesherhead app from your home screen or app drawer to continue. The browser version is not available.';
+    const installBtn = document.getElementById(
+      'pwa-enforce-install-btn'
+    ) as HTMLAnchorElement | null;
+    if (installBtn) installBtn.style.display = 'none';
+    const iosEl = document.getElementById('pwa-enforce-ios');
+    if (iosEl) iosEl.style.display = 'none';
+
+    if (!pwaEnforcement) startEnforcementLayers(overlay);
   }
+
   const btn = document.getElementById('pwa-install-btn');
   if (btn) btn.style.display = 'none';
   const msg = document.getElementById('pwa-installed-msg');
@@ -879,32 +917,15 @@ function enforcePWAOverlay(): void {
   const overlay = document.getElementById('pwa-enforce-overlay');
   if (!overlay) return;
 
-  // If running in standalone mode, hide overlay — user is already in the PWA
+  // Standalone: hide the gate — user is already in the PWA.
   if (isStandaloneMode()) {
     syncPWAInstallUI();
     return;
   }
 
-  // App is installed but user is in a regular browser tab — force PWA usage
+  // Installed but in a regular browser tab — force PWA usage.
   if (isInstalledButNotStandalone()) {
-    overlay.style.display = 'flex';
-    overlay.style.visibility = 'visible';
-    overlay.style.opacity = '1';
-
-    // Show "open from home screen" message
-    const titleEl = document.getElementById('pwa-enforce-title');
-    if (titleEl) titleEl.textContent = 'Open Jesherhead App';
-    const descEl = document.getElementById('pwa-enforce-desc');
-    if (descEl) descEl.textContent = 'Please open the Jesherhead app from your home screen or app drawer to continue. The browser version is not available.';
-    const installBtn = document.getElementById('pwa-enforce-install-btn') as HTMLAnchorElement | null;
-    if (installBtn) installBtn.style.display = 'none';
-    const iosEl = document.getElementById('pwa-enforce-ios');
-    if (iosEl) iosEl.style.display = 'none';
-
-    // Start enforcement layers if not already active
-    if (!pwaEnforcement) {
-      startEnforcementLayers(overlay);
-    }
+    showOpenAppGate();
     return;
   }
 
@@ -915,7 +936,9 @@ function enforcePWAOverlay(): void {
   const titleEl = document.getElementById('pwa-enforce-title');
   if (titleEl) titleEl.textContent = 'Install Jesherhead';
   const descEl = document.getElementById('pwa-enforce-desc');
-  if (descEl) descEl.textContent = 'This app must be installed as a web app to use. Install it now for the full experience — no URL bar, offline support, and app-like performance.';
+  if (descEl)
+    descEl.textContent =
+      'This app must be installed as a web app to use. Install it now for the full experience — no URL bar, offline support, and app-like performance.';
 
   // Detect iOS
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
@@ -938,11 +961,12 @@ function enforcePWAOverlay(): void {
 
 function startEnforcementLayers(overlay: HTMLElement): void {
   // === STRICT ENFORCEMENT LAYERS ===
+  // Force-PWA: the gate stays up both when not installed AND when installed
+  // in a regular tab. Only a standalone launch dismisses it.
 
   // Layer 1: MutationObserver — re-show overlay if anyone tries to hide/remove it
   const observer = new MutationObserver(_mutations => {
-    // Only enforce while the app is still not installed
-    if (isInstalledOrStandalone()) {
+    if (isStandaloneMode()) {
       syncPWAInstallUI();
       return;
     }
@@ -958,10 +982,8 @@ function startEnforcementLayers(overlay: HTMLElement): void {
       if (isRemoved) {
         document.body.appendChild(overlay);
       }
-      // Force show
-      overlay.style.display = 'flex';
-      overlay.style.visibility = 'visible';
-      overlay.style.opacity = '1';
+      // Restore the correct gate state (Install vs Open App message).
+      enforcePWAOverlay();
       overlay.style.zIndex = '999999';
     }
   });
@@ -986,13 +1008,7 @@ function startEnforcementLayers(overlay: HTMLElement): void {
 
   // Layer 3: Resize listener — re-check install state on resize
   window.addEventListener('resize', () => {
-    if (isInstalledOrStandalone()) {
-      syncPWAInstallUI();
-      return;
-    }
-    overlay.style.display = 'flex';
-    overlay.style.visibility = 'visible';
-    overlay.style.opacity = '1';
+    enforcePWAOverlay();
   });
 
   // Layer 4: Re-check when the user comes back — the install may have finished
@@ -1000,37 +1016,28 @@ function startEnforcementLayers(overlay: HTMLElement): void {
   // seeing `appinstalled`.
   const recheck = () => {
     if (document.hidden) return;
-    if (isInstalledOrStandalone()) syncPWAInstallUI();
+    enforcePWAOverlay();
   };
   document.addEventListener('visibilitychange', recheck);
   window.addEventListener('focus', recheck);
 
   // Layer 5: Periodic check — catch any edge cases (tab restore, etc.)
   const interval = setInterval(() => {
-    if (isInstalledOrStandalone()) {
-      syncPWAInstallUI();
-      return;
-    }
-    overlay.style.display = 'flex';
-    overlay.style.visibility = 'visible';
-    overlay.style.opacity = '1';
     if (!document.body.contains(overlay)) {
       document.body.appendChild(overlay);
     }
+    enforcePWAOverlay();
   }, 2000);
 
   pwaEnforcement = { observer, interval };
 }
 
 function checkPWAInstallAvailability(): void {
-  // Standalone: never advertise installation again — swap the
-  // button for the confirmation message (and hide the gate if it is up).
+  // Standalone: hide the gate, swap the button for the confirmation message.
+  // Installed-but-not-standalone: hide the install button (the gate shows the
+  // "open from home screen" message instead).
   syncPWAInstallUI();
-  if (isStandaloneMode()) return;
-
-  // Installed but not standalone: don't show install button, the overlay
-  // already shows the "open from home screen" message
-  if (isAppInstalled()) return;
+  if (isStandaloneMode() || isAppInstalled()) return;
 
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const btn = document.getElementById('pwa-install-btn');

@@ -9,13 +9,19 @@ import {
 /**
  * The PWA gate (`#pwa-enforce-overlay`) is visible by default in the HTML, so
  * if boot never runs — or if no install signal is ever recognised — the page
- * stays blocked *even after the app has been installed*. These tests drive the
- * real boot path (src/main.ts) and assert the gate drops for every install
- * signal the app can receive.
+ * stays blocked. Force-PWA (three states) is enforced:
+ * - standalone (installed app window): gate hidden
+ * - installed but in a regular browser tab: gate stays up with the "Open App"
+ *   message (browser usage is not allowed)
+ * - not installed: gate stays up with the install prompt.
+ * These tests drive the real boot path (src/main.ts) and assert the gate
+ * transitions for every install signal the app can receive.
  */
 
 const FIXTURE = `
   <div id="pwa-enforce-overlay" style="position:fixed;inset:0;z-index:999999;background:#111;display:flex;">
+    <h1 id="pwa-enforce-title">Install Jesherhead</h1>
+    <p id="pwa-enforce-desc">Install prompt</p>
     <a id="pwa-enforce-install-btn" href="#" style="display:block">How to Install</a>
     <div id="pwa-enforce-ios" style="display:none"></div>
   </div>
@@ -25,6 +31,7 @@ const FIXTURE = `
 `;
 
 const gate = () => document.getElementById('pwa-enforce-overlay') as HTMLElement;
+const gateTitle = () => document.getElementById('pwa-enforce-title') as HTMLElement;
 const installBtn = () => document.getElementById('pwa-install-btn') as HTMLButtonElement;
 const installedMsg = () => document.getElementById('pwa-installed-msg') as HTMLElement;
 
@@ -115,36 +122,46 @@ describe('PWA install gate', () => {
     await flush();
 
     expect(promptCalls).toBe(1);
-    expect(gate().style.display).toBe('none');
+    // Force-PWA: an install accepted in a regular browser tab flips the gate
+    // to the "Open App" state instead of dismissing it.
+    expect(gate().style.display).toBe('flex');
+    expect(gateTitle().textContent).toContain('Open');
     expect(localStorage.getItem('pwaInstalled')).toBe('1');
     expect(installedMsg().style.display).toBe('block');
     expect(installBtn().style.display).toBe('none');
   });
 
-  it('drops the gate on appinstalled and remembers the install', async () => {
+  it('switches to the Open App gate on appinstalled and remembers the install', async () => {
     expect(gate().style.display).toBe('flex');
 
     window.dispatchEvent(new Event('appinstalled'));
     await flush();
 
-    expect(gate().style.display).toBe('none');
+    expect(gate().style.display).toBe('flex');
+    expect(gateTitle().textContent).toContain('Open');
     expect(localStorage.getItem('pwaInstalled')).toBe('1');
     expect(installedMsg().style.display).toBe('block');
     expect(installBtn().style.display).toBe('none');
 
-    // Enforcement must stop watching the gate after the install: unrelated DOM
-    // activity must not bring the "install the app" screen back.
+    // Force-PWA: enforcement stays active after the install — unrelated DOM
+    // activity must not dismiss the "open from home screen" screen.
     document.body.appendChild(document.createElement('span'));
     await flush();
-    expect(gate().style.display).toBe('none');
+    expect(gate().style.display).toBe('flex');
+
+    // Manual attempts to hide the Open App gate must be restored.
+    gate().style.display = 'none';
+    await flush();
+    expect(gate().style.display).toBe('flex');
   });
 
-  it('never raises the gate again once the install flag is persisted', () => {
+  it('forces the Open App gate in a browser tab once the install flag is persisted', () => {
     localStorage.setItem('pwaInstalled', '1');
     enforcePWAOverlay();
-    expect(gate().style.display).toBe('none');
+    expect(gate().style.display).toBe('flex');
+    expect(gateTitle().textContent).toContain('Open');
     checkPWAInstallAvailability();
-    expect(gate().style.display).toBe('none');
+    expect(gate().style.display).toBe('flex');
     expect(installedMsg().style.display).toBe('block');
     expect(installBtn().style.display).toBe('none');
   });
@@ -167,15 +184,29 @@ describe('PWA install gate', () => {
     expect(localStorage.getItem('pwaInstalled')).toBeNull();
   });
 
-  it('leaves DevTools (F12) usable while the gate is up, blocks it after', async () => {
+  it('leaves DevTools (F12) usable while the gate is up, blocks it in the app', async () => {
     expect(gate().style.display).toBe('flex');
 
     const onGate = new KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
     document.dispatchEvent(onGate);
     expect(onGate.defaultPrevented).toBe(false);
 
+    // Force-PWA: an install in a browser tab keeps the gate up, so DevTools
+    // stays usable there. Only a standalone launch (gate hidden) blocks it.
     window.dispatchEvent(new Event('appinstalled'));
     await flush();
+    expect(gate().style.display).toBe('flex');
+
+    const onOpenAppGate = new KeyboardEvent('keydown', {
+      key: 'F12',
+      cancelable: true,
+      bubbles: true,
+    });
+    document.dispatchEvent(onOpenAppGate);
+    expect(onOpenAppGate.defaultPrevented).toBe(false);
+
+    mockDisplayMode(true);
+    enforcePWAOverlay();
     expect(gate().style.display).toBe('none');
 
     const installed = new KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
