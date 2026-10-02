@@ -719,21 +719,48 @@ function installPWA(): void {
 }
 
 function isStandaloneMode(): boolean {
-  return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.matchMedia('(display-mode: window-controls-overlay)').matches ||
-    window.matchMedia('(display-mode: tabbed)').matches ||
-    (window.navigator as unknown as { standalone?: boolean }).standalone === true
-  );
+  const standalone = window.matchMedia('(display-mode: standalone)').matches;
+  const fullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
+  const wco = window.matchMedia('(display-mode: window-controls-overlay)').matches;
+  const tabbed = window.matchMedia('(display-mode: tabbed)').matches;
+  const iOSStandalone =
+    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+
+  const result = standalone || fullscreen || wco || tabbed || iOSStandalone;
+
+  // Debug logging
+  if (typeof window !== 'undefined' && window.console) {
+    console.log('[PWA] Display mode detection:', {
+      standalone,
+      fullscreen,
+      wco,
+      tabbed,
+      iOSStandalone,
+      result,
+      displayMode: window.matchMedia('(display-mode: standalone)').media,
+      navigatorStandalone: (window.navigator as unknown as { standalone?: boolean }).standalone,
+    });
+  }
+
+  return result;
 }
 
 function isAppInstalled(): boolean {
-  return ST.get('pwaInstalled') === '1';
+  const installed = ST.get('pwaInstalled') === '1';
+  console.log('[PWA] isAppInstalled:', installed, 'localStorage:', ST.get('pwaInstalled'));
+  return installed;
 }
 
 function markAppInstalled(): void {
+  console.log('[PWA] markAppInstalled called');
   ST.set('pwaInstalled', '1');
+}
+
+function markAppInstalledAndHide(): void {
+  console.log('[PWA] Manual markAppInstalledAndHide called');
+  markAppInstalled();
+  const overlay = document.getElementById('pwa-enforce-overlay');
+  if (overlay) overlay.style.display = 'none';
 }
 
 function enforcePWAOverlay(): void {
@@ -759,6 +786,18 @@ function enforcePWAOverlay(): void {
     if (installBtn) installBtn.style.display = 'none';
   } else if (iosEl) {
     iosEl.style.display = 'none';
+  }
+
+  // Show "I've Already Installed It" button after 10 seconds as fallback
+  const manualBtn = document.getElementById(
+    'pwa-enforce-installed-btn'
+  ) as HTMLButtonElement | null;
+  if (manualBtn) {
+    setTimeout(() => {
+      if (!isStandaloneMode() && !isAppInstalled()) {
+        manualBtn.style.display = 'block';
+      }
+    }, 10000);
   }
 
   // === STRICT ENFORCEMENT LAYERS ===
@@ -924,6 +963,7 @@ function openCloak(): void {
 (window as unknown as Record<string, unknown>).initViewFromHash = initViewFromHash;
 (window as unknown as Record<string, unknown>).startPlayTimer = startPlayTimer;
 (window as unknown as Record<string, unknown>).setDeferredPrompt = setDeferredPrompt;
+(window as unknown as Record<string, unknown>).markAppInstalledAndHide = markAppInstalledAndHide;
 
 export {
   setRandomLandingText,
@@ -954,6 +994,7 @@ export {
   isStandaloneMode,
   isAppInstalled,
   markAppInstalled,
+  markAppInstalledAndHide,
   updateOnlineStatus,
   setDeferredPrompt,
 };
