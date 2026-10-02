@@ -144,7 +144,7 @@
         if (updateToastShown) doReloadOnce();
         else showUpdateToast(null, true);
       });
-      navigator.serviceWorker.register(new URL('sw.js', document.baseURI).href)
+      navigator.serviceWorker.register(new URL('sw.js', document.baseURI).href, { scope: './' })
         .then(reg => {
           console.log('[SW] Registered:', reg.scope);
           // Update was already waiting (found during a previous session).
@@ -1772,7 +1772,7 @@
       }
     }
   </style>
-  <base target="_self">
+  <base href="./" target="_self">
 </head>
 
 <body>
