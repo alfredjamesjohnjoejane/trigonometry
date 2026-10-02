@@ -95,12 +95,17 @@ The application boots in a specific order to ensure security and functionality:
 1. **Module evaluation** (`main.ts` top-level):
    - `installDevtoolsProtection()` — blocks DevTools shortcuts, right-click
    - `initAnalytics()` — initializes PostHog
+   - `beforeinstallprompt` / `appinstalled` listeners — install signals are
+     captured here (not in a DOM handler) so an early event is never missed
 
-2. **DOMContentLoaded**:
+2. **Boot** (`boot()`, on `DOMContentLoaded` — or immediately if the module
+   evaluates after it already fired):
+   - `enforcePWAOverlay()` + `checkPWAInstallAvailability()` — evaluated first:
+     the install gate ships visible in the HTML, so unrelated setup failures
+     must never be able to leave it stuck open
    - `setupBlockedUrlGuards()` — prevents navigation to blocked ported domain
    - `scrubPortedLinks()` — removes blocked URLs from DOM
    - Online/offline detection setup
-   - PWA install prompt capture
    - `setRandomLandingText()` — easter egg subtext
    - `showTOSPopup()` — Terms of Service gate
    - `initHomepageTest()` — Lumin SDK game loader

@@ -12,7 +12,7 @@ The UI module orchestrates the main user interface: landing page, game overlay, 
 | TOS gate | `showTOSPopup()`, `acknowledgeTOS()`, `declineTOS()`, `showTOSViewer()` |
 | DMCA | `showDCMAInfo()`, `closeDCMAViewer()` |
 | Game status | `checkGameStatus()`, `pingTarget()`, `showMaintenance()` |
-| PWA | `checkPWAInstallAvailability()`, `installPWA()` |
+| PWA | `enforcePWAOverlay()`, `syncPWAInstallUI()`, `checkPWAInstallAvailability()`, `installPWA()` |
 | Online/offline | `updateOnlineStatus()` |
 | Play timer | `startPlayTimer()` |
 | Cloak | `openCloak()` |

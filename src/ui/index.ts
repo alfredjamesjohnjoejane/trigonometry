@@ -706,43 +706,97 @@ function initHomepageTest(): void {
   document.body.appendChild(s);
 }
 
+/** Shape of the event captured from `beforeinstallprompt`. */
+type BeforeInstallPromptEvent = Event & {
+  prompt?: () => void;
+  userChoice?: Promise<{ outcome?: string; platform?: string }>;
+};
+
+function showInstallMenuHint(): void {
+  const toast = document.getElementById('error-toast');
+  if (toast) {
+    toast.textContent = 'Use browser menu (⋮) → Install jesherhead';
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+}
+
 function installPWA(): void {
-  const prompt = getDeferredPrompt();
-  if (prompt) {
-    try {
-      (prompt as unknown as { prompt: () => void }).prompt();
-    } catch {
-      /* ignore */
-    }
-    setDeferredPrompt(null);
+  const promptEvent = getDeferredPrompt() as BeforeInstallPromptEvent | null;
+  if (!promptEvent || typeof promptEvent.prompt !== 'function') {
+    // No native prompt available (Firefox/Safari, or the event was never
+    // captured): fall back to the menu instructions instead of a silent no-op.
+    showInstallMenuHint();
+    return;
+  }
+
+  // `prompt()` is single-use and `userChoice` must be read before the event is
+  // dropped. An accepted choice is proof of installation on its own: do not
+  // depend on the separate `appinstalled` event reaching this document, since
+  // it is not guaranteed to fire here (missed while booting, or the install
+  // was started from another tab).
+  let userChoice: Promise<{ outcome?: string }> | null = null;
+  try {
+    promptEvent.prompt();
+    userChoice = promptEvent.userChoice ?? null;
+  } catch {
+    userChoice = null;
+  }
+  setDeferredPrompt(null);
+
+  if (userChoice && typeof userChoice.then === 'function') {
+    userChoice
+      .then(choice => {
+        if (choice && choice.outcome === 'accepted') markInstalled();
+      })
+      .catch(() => {
+        /* dismissed — nothing to persist */
+      });
+  }
+}
+
+/** Standalone/installed checks must never throw: an aborted check would leave
+ *  the gate stuck open, so a missing/odd `matchMedia` degrades to "not
+ *  standalone" and falls back to the persisted install flag. */
+function safeMatches(query: string): boolean {
+  try {
+    return typeof window.matchMedia === 'function' ? window.matchMedia(query).matches : false;
+  } catch {
+    return false;
   }
 }
 
 function isStandaloneMode(): boolean {
-  const standalone = window.matchMedia('(display-mode: standalone)').matches;
-  const fullscreen = window.matchMedia('(display-mode: fullscreen)').matches;
-  const wco = window.matchMedia('(display-mode: window-controls-overlay)').matches;
-  const tabbed = window.matchMedia('(display-mode: tabbed)').matches;
-  const iOSStandalone =
-    (window.navigator as unknown as { standalone?: boolean }).standalone === true;
+  // Detection must never throw: an aborted check would leave the install gate
+  // stuck open (or abort an enforcement callback mid-run).
+  try {
+    const standalone = safeMatches('(display-mode: standalone)');
+    const fullscreen = safeMatches('(display-mode: fullscreen)');
+    const wco = safeMatches('(display-mode: window-controls-overlay)');
+    const tabbed = safeMatches('(display-mode: tabbed)');
+    const iOSStandalone =
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true;
 
-  const result = standalone || fullscreen || wco || tabbed || iOSStandalone;
+    const result = standalone || fullscreen || wco || tabbed || iOSStandalone;
 
-  // Debug logging
-  if (typeof window !== 'undefined' && window.console) {
-    console.log('[PWA] Display mode detection:', {
-      standalone,
-      fullscreen,
-      wco,
-      tabbed,
-      iOSStandalone,
-      result,
-      displayMode: window.matchMedia('(display-mode: standalone)').media,
-      navigatorStandalone: (window.navigator as unknown as { standalone?: boolean }).standalone,
-    });
+    // Debug logging
+    if (typeof window !== 'undefined' && window.console) {
+      console.log('[PWA] Display mode detection:', {
+        standalone,
+        fullscreen,
+        wco,
+        tabbed,
+        iOSStandalone,
+        result,
+        displayMode: safeMatches('(display-mode: standalone)'),
+        navigatorStandalone: (window.navigator as unknown as { standalone?: boolean }).standalone,
+      });
+    }
+
+    return result;
+  } catch {
+    return false;
   }
-
-  return result;
 }
 
 function isAppInstalled(): boolean {
@@ -756,13 +810,70 @@ function markAppInstalled(): void {
   ST.set('pwaInstalled', '1');
 }
 
+/** Running as an installed app OR the install already completed. */
+function isInstalledOrStandalone(): boolean {
+  return isStandaloneMode() || isAppInstalled();
+}
+
+/** Records the install and drops the gate immediately. */
+function markInstalled(): void {
+  markAppInstalled();
+  syncPWAInstallUI();
+}
+
+type PWAEnforcement = { observer: MutationObserver; interval: ReturnType<typeof setInterval> };
+
+// Active only while the gate is up. Cleared the moment the app is installed
+// so enforcement can never fight the dismissal.
+let pwaEnforcement: PWAEnforcement | null = null;
+
+function stopPWAEnforcement(): void {
+  if (!pwaEnforcement) return;
+  try {
+    pwaEnforcement.observer.disconnect();
+  } catch {
+    /* ignore */
+  }
+  clearInterval(pwaEnforcement.interval);
+  pwaEnforcement = null;
+}
+
+/**
+ * Single source of truth for "the app is installed": hides the install gate
+ * (and the install button) and stops enforcement. Idempotent, safe to call
+ * from every install signal — boot, `appinstalled`, an accepted `userChoice`,
+ * a focus/visibility re-check, or the periodic watchdog.
+ */
+function syncPWAInstallUI(): void {
+  if (!isInstalledOrStandalone()) return;
+
+  // A standalone launch proves the app is installed. Persist it: the browser
+  // tab shares this storage, so opening the installed app once also unlocks
+  // the tab that is still showing the gate (its `appinstalled` event may have
+  // been missed entirely).
+  if (isStandaloneMode() && !isAppInstalled()) markAppInstalled();
+
+  stopPWAEnforcement();
+
+  const overlay = document.getElementById('pwa-enforce-overlay');
+  if (overlay) {
+    overlay.style.visibility = 'visible';
+    overlay.style.opacity = '1';
+    overlay.style.display = 'none';
+  }
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.style.display = 'none';
+  const msg = document.getElementById('pwa-installed-msg');
+  if (msg) msg.style.display = 'block';
+}
+
 function enforcePWAOverlay(): void {
   const overlay = document.getElementById('pwa-enforce-overlay');
   if (!overlay) return;
 
   // If running in standalone mode OR app was previously installed, hide overlay
-  if (isStandaloneMode() || isAppInstalled()) {
-    overlay.style.display = 'none';
+  if (isInstalledOrStandalone()) {
+    syncPWAInstallUI();
     return;
   }
 
@@ -781,30 +892,36 @@ function enforcePWAOverlay(): void {
     iosEl.style.display = 'none';
   }
 
+  // Layers are attached once — repeated calls (re-entry, tests) must not stack
+  // duplicate observers/intervals/listeners.
+  if (pwaEnforcement) return;
+
   // === STRICT ENFORCEMENT LAYERS ===
 
   // Layer 1: MutationObserver — re-show overlay if anyone tries to hide/remove it
   const observer = new MutationObserver(_mutations => {
-    // Only enforce if not standalone and not previously installed
-    if (!isStandaloneMode() && !isAppInstalled()) {
-      // Check if overlay was hidden or removed
-      const isHidden =
-        overlay.style.display === 'none' ||
-        overlay.style.visibility === 'hidden' ||
-        overlay.style.opacity === '0';
-      const isRemoved = !document.body.contains(overlay);
+    // Only enforce while the app is still not installed
+    if (isInstalledOrStandalone()) {
+      syncPWAInstallUI();
+      return;
+    }
+    // Check if overlay was hidden or removed
+    const isHidden =
+      overlay.style.display === 'none' ||
+      overlay.style.visibility === 'hidden' ||
+      overlay.style.opacity === '0';
+    const isRemoved = !document.body.contains(overlay);
 
-      if (isHidden || isRemoved) {
-        // Re-attach if removed
-        if (isRemoved) {
-          document.body.appendChild(overlay);
-        }
-        // Force show
-        overlay.style.display = 'flex';
-        overlay.style.visibility = 'visible';
-        overlay.style.opacity = '1';
-        overlay.style.zIndex = '999999';
+    if (isHidden || isRemoved) {
+      // Re-attach if removed
+      if (isRemoved) {
+        document.body.appendChild(overlay);
       }
+      // Force show
+      overlay.style.display = 'flex';
+      overlay.style.visibility = 'visible';
+      overlay.style.opacity = '1';
+      overlay.style.zIndex = '999999';
     }
   });
   observer.observe(overlay, { attributes: true, attributeFilter: ['style', 'class'] });
@@ -812,8 +929,10 @@ function enforcePWAOverlay(): void {
 
   // Layer 2: Visual blocker — ensure overlay stays on top and blocks interaction
   // The HTML already has z-index: 999999, but add a style to prevent any z-index conflicts
-  const style = document.createElement('style');
-  style.textContent = `
+  if (!document.getElementById('pwa-enforce-lock')) {
+    const style = document.createElement('style');
+    style.id = 'pwa-enforce-lock';
+    style.textContent = `
     #pwa-enforce-overlay {
       z-index: 999999 !important;
     }
@@ -821,56 +940,67 @@ function enforcePWAOverlay(): void {
       pointer-events: auto !important;
     }
   `;
-  document.head.appendChild(style);
+    document.head.appendChild(style);
+  }
 
-  // Layer 3: Resize listener — re-check standalone mode on resize
+  // Layer 3: Resize listener — re-check install state on resize
   window.addEventListener('resize', () => {
-    if (!isStandaloneMode() && !isAppInstalled()) {
-      overlay.style.display = 'flex';
-      overlay.style.visibility = 'visible';
-      overlay.style.opacity = '1';
-    } else {
-      overlay.style.display = 'none';
+    if (isInstalledOrStandalone()) {
+      syncPWAInstallUI();
+      return;
     }
+    overlay.style.display = 'flex';
+    overlay.style.visibility = 'visible';
+    overlay.style.opacity = '1';
   });
 
-  // Layer 4: Periodic check — catch any edge cases (tab restore, etc.)
+  // Layer 4: Re-check when the user comes back — the install may have finished
+  // in another tab, which sets the shared flag without this document ever
+  // seeing `appinstalled`.
+  const recheck = () => {
+    if (document.hidden) return;
+    if (isInstalledOrStandalone()) syncPWAInstallUI();
+  };
+  document.addEventListener('visibilitychange', recheck);
+  window.addEventListener('focus', recheck);
+
+  // Layer 5: Periodic check — catch any edge cases (tab restore, etc.)
   const interval = setInterval(() => {
-    if (!isStandaloneMode() && !isAppInstalled()) {
-      overlay.style.display = 'flex';
-      overlay.style.visibility = 'visible';
-      overlay.style.opacity = '1';
-      if (!document.body.contains(overlay)) {
-        document.body.appendChild(overlay);
-      }
-    } else {
-      overlay.style.display = 'none';
-      clearInterval(interval);
+    if (isInstalledOrStandalone()) {
+      syncPWAInstallUI();
+      return;
+    }
+    overlay.style.display = 'flex';
+    overlay.style.visibility = 'visible';
+    overlay.style.opacity = '1';
+    if (!document.body.contains(overlay)) {
+      document.body.appendChild(overlay);
     }
   }, 2000);
+
+  pwaEnforcement = { observer, interval };
 }
 
 function checkPWAInstallAvailability(): void {
-  const isStandalone = isStandaloneMode();
+  // Installed or standalone: never advertise installation again — swap the
+  // button for the confirmation message (and hide the gate if it is up).
+  syncPWAInstallUI();
+  if (isInstalledOrStandalone()) return;
+
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   const btn = document.getElementById('pwa-install-btn');
-  const msg = document.getElementById('pwa-installed-msg');
-  const prompt = getDeferredPrompt();
-  if (!isStandalone && !isIOS && btn && !prompt) {
-    btn.style.display = 'block';
+  if (isIOS || !btn) return;
+
+  // The prompt usually arrives AFTER boot, and boot installs the menu-hint
+  // handler when no prompt exists yet — so this function must (re)wire the
+  // button every time it runs, otherwise `installPWA` stays unreachable.
+  btn.style.display = 'block';
+  if (getDeferredPrompt()) {
+    btn.textContent = 'Add to Home Screen';
+    btn.onclick = () => installPWA();
+  } else {
     btn.textContent = 'Open browser menu → Install jesherhead';
-    btn.onclick = () => {
-      const toast = document.getElementById('error-toast');
-      if (toast) {
-        toast.textContent = 'Use browser menu (⋮) → Install jesherhead';
-        toast.classList.add('show');
-        setTimeout(() => toast.classList.remove('show'), 3000);
-      }
-    };
-  }
-  if (isStandalone && msg) {
-    msg.style.display = 'block';
-    if (btn) btn.style.display = 'none';
+    btn.onclick = showInstallMenuHint;
   }
 }
 
@@ -973,7 +1103,11 @@ export {
   enforcePWAOverlay,
   isStandaloneMode,
   isAppInstalled,
+  isInstalledOrStandalone,
   markAppInstalled,
+  markInstalled,
+  syncPWAInstallUI,
+  stopPWAEnforcement,
   updateOnlineStatus,
   setDeferredPrompt,
 };

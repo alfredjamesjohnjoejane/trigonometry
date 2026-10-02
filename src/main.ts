@@ -18,6 +18,7 @@ import {
   checkGameStatus,
   setDeferredPrompt,
   markAppInstalled,
+  syncPWAInstallUI,
 } from './ui/index.js';
 import { setupBlockedUrlGuards, scrubPortedLinks, showErrorToast } from './utils/index.js';
 
@@ -26,7 +27,41 @@ import { setupBlockedUrlGuards, scrubPortedLinks, showErrorToast } from './utils
 installDevtoolsProtection();
 initAnalytics();
 
-document.addEventListener('DOMContentLoaded', () => {
+// Install-signal listeners live at module scope, NOT inside the boot handler:
+// `beforeinstallprompt` can fire while the document is still parsing and
+// `appinstalled` can arrive before boot completes. Deferring them to
+// DOMContentLoaded loses the event — and with it the only signal that tells
+// this page the install already happened.
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  setDeferredPrompt(e);
+  // The boot path wires the button to the menu hint when no prompt exists;
+  // re-run it now that a native prompt is available so the button actually
+  // calls installPWA() instead of showing instructions.
+  checkPWAInstallAvailability();
+});
+
+window.addEventListener('appinstalled', () => {
+  setDeferredPrompt(null);
+  markAppInstalled();
+  // Hides the gate, stops enforcement and swaps the install button for the
+  // "Added to home screen" confirmation.
+  syncPWAInstallUI();
+  showErrorToast('App installed!');
+});
+
+let booted = false;
+function boot(): void {
+  if (booted) return;
+  booted = true;
+
+  // Evaluate the install gate FIRST: it is visible by default in the HTML, so
+  // any failure in the unrelated setup below must never be able to leave the
+  // "install the app" screen stuck open (this is exactly what happens after a
+  // user installs the app if the gate is never re-evaluated).
+  enforcePWAOverlay();
+  checkPWAInstallAvailability();
+
   setupBlockedUrlGuards();
   scrubPortedLinks();
 
@@ -42,36 +77,29 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('offline', () => updateOnlineStatus());
   updateOnlineStatus();
 
-  window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    setDeferredPrompt(e);
-    const btn = document.getElementById('pwa-install-btn');
-    if (btn) btn.style.display = 'block';
-  });
-
-  window.addEventListener('appinstalled', () => {
-    const btn = document.getElementById('pwa-install-btn');
-    const msg = document.getElementById('pwa-installed-msg');
-    if (btn) btn.style.display = 'none';
-    if (msg) msg.style.display = 'block';
-    setDeferredPrompt(null);
-    markAppInstalled();
-    showErrorToast('App installed!');
-    // Hide the enforcement overlay
-    const overlay = document.getElementById('pwa-enforce-overlay');
-    if (overlay) overlay.style.display = 'none';
-  });
-
-  enforcePWAOverlay();
-  checkPWAInstallAvailability();
   setRandomLandingText();
   showTOSPopup();
   initHomepageTest();
   initViewFromHash();
   window.addEventListener('hashchange', initViewFromHash);
-});
+}
 
-window.addEventListener('load', () => {
+// Boot even if this module evaluated after DOMContentLoaded already fired
+// (late/dynamic injection, tests, bfcache-less restores). Waiting on an event
+// that has already been dispatched would leave the install gate up forever.
+// Direct calls are guarded: inside an event listener an exception is isolated
+// by the dispatcher, but at module scope it would abort evaluation entirely.
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', boot, { once: true });
+} else {
+  try {
+    boot();
+  } catch (err) {
+    console.error('[Boot] init failed:', err);
+  }
+}
+
+function onPageLoad(): void {
   try {
     if (
       window.location.origin !== 'null' &&
@@ -111,4 +139,14 @@ window.addEventListener('load', () => {
   setInterval(() => {
     void checkGameStatus(false);
   }, 300000);
-});
+}
+
+if (document.readyState === 'complete') {
+  try {
+    onPageLoad();
+  } catch (err) {
+    console.error('[Boot] load handler failed:', err);
+  }
+} else {
+  window.addEventListener('load', onPageLoad, { once: true });
+}

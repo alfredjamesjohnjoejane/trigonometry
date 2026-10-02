@@ -116,12 +116,22 @@ self.addEventListener('message', (event) => {
 
 ### Install Flow
 
-1. **`beforeinstallprompt`** event fires (Chrome/Edge)
-2. Event is captured and stored (`setDeferredPrompt`)
-3. Install button appears: "Open browser menu → Install jesherhead"
-4. Clicking shows a toast with instructions (for browsers that need menu interaction)
-5. **`appinstalled`** event fires on successful install
-6. Install button hides, "Added to home screen" message shows
+1. **`beforeinstallprompt`** event fires (Chrome/Edge) — the listener is
+   registered at module scope, not in the boot handler, so an event that
+   arrives while the document is still parsing is captured too
+2. Event is captured (`setDeferredPrompt`) and the install button is (re)wired:
+   - prompt available → button calls `installPWA()` → native install dialog
+   - no prompt (Firefox/Safari/older Chrome) → button shows the
+     "Open browser menu → Install jesherhead" hint
+3. `installPWA()` calls `prompt()` and reads `userChoice` **before** dropping
+   the event (`prompt()` is single-use)
+4. **Install completes** through any of these signals, and each one routes to
+   `syncPWAInstallUI()`:
+   - `appinstalled` event on this page
+   - `userChoice` resolving to `accepted`
+   - a later standalone launch (persisted as the `pwaInstalled` flag)
+5. Result: enforcement overlay hidden, enforcement layers stopped, install
+   button hidden, "✅ Added to home screen" message shown
 
 ### Platform Detection
 
@@ -146,15 +156,24 @@ The app enforces installation as a PWA — it cannot be used in a regular browse
 
 1. **Visible by default** in HTML (`display: flex`) — blocks access even if JS fails or is disabled
 2. **`<noscript>` fallback** — reinforces overlay visibility and shows "JavaScript Required" message
-3. **JS hides overlay** only when `isStandaloneMode()` returns true
+3. **Boot evaluates the gate first** (`enforcePWAOverlay()` runs before the rest
+   of init) and boots immediately if the module is evaluated after
+   `DOMContentLoaded` already fired — otherwise a missed event would leave the
+   gate stuck open forever
+4. **JS hides the gate** as soon as `syncPWAInstallUI()` sees
+   `isStandaloneMode() || isAppInstalled()` — at boot, on `appinstalled`, on an
+   accepted `userChoice`, on focus/visibility, and from the watchdog interval
 
 #### `isStandaloneMode()` Detection
 
 ```ts
 function isStandaloneMode(): boolean {
+  // never throws: a failed check must not abort the gate evaluation
   return (
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: fullscreen)').matches ||
+    matches('(display-mode: standalone)') ||
+    matches('(display-mode: fullscreen)') ||
+    matches('(display-mode: window-controls-overlay)') ||
+    matches('(display-mode: tabbed)') ||
     navigator.standalone === true  // iOS
   );
 }
@@ -162,24 +181,40 @@ function isStandaloneMode(): boolean {
 
 - `display-mode: standalone` — Standard PWA install (Chrome, Edge, Firefox, Safari on macOS)
 - `display-mode: fullscreen` — Fullscreen PWA mode (rare, but valid)
+- `display-mode: window-controls-overlay` / `tabbed` — Chrome OS app windows
 - `navigator.standalone` — iOS home screen app (legacy, but still used)
+- Every `matchMedia` call is wrapped: a throwing/absent API degrades to
+  "not standalone" and falls back to the persisted `pwaInstalled` flag instead
+  of leaving the gate stuck open
 
 #### Strict Enforcement Layers
+
+Active only while the app is **not** installed; `stopPWAEnforcement()` tears
+them all down the moment an install signal arrives, so enforcement can never
+fight the dismissal.
 
 1. **MutationObserver** — Watches overlay for `style`/`class` changes AND watches `document.body` for childList changes (catches removal). Re-attaches and re-shows overlay if hidden/removed.
 
 2. **CSS z-index lock** — Injects `!important` z-index to keep overlay above everything.
 
-3. **Resize listener** — Re-checks standalone mode on window resize.
+3. **Resize listener** — Re-checks install state on window resize.
 
-4. **Periodic check (2s interval)** — Catches edge cases like session restore, back-forward cache, etc. Auto-clears when standalone mode detected.
+4. **Focus / visibilitychange listener** — Catches installs completed in
+   another tab (the shared `pwaInstalled` flag is re-read when the user
+   returns).
+
+5. **Periodic check (2s interval)** — Catches edge cases like session restore, back-forward cache, etc. Stops itself once installed.
 
 #### Install Flow from Overlay
 
 1. User clicks "Install App" button (Android/Chrome/Edge)
 2. `beforeinstallprompt` captured earlier → `prompt.prompt()` called
 3. Browser shows native install dialog
-4. On `appinstalled` event: overlay hidden, toast shown, page reloads in standalone mode
+4. On `appinstalled` **or** an accepted `userChoice`: `syncPWAInstallUI()`
+   hides the overlay, stops enforcement, persists the `pwaInstalled` flag and
+   shows the toast
+5. On browsers without `beforeinstallprompt`, the button explains the browser
+   menu route (⋮ → Install) instead of doing nothing
 
 #### iOS Handling
 
