@@ -48,7 +48,7 @@ Landing Page (#lp)
     │
     ├── "TOS" → showTOSViewer()
     │
-    ├── "URLs" → window.location.href = 'urls.html'
+    ├── "Padlet" → window.open(Padlet URL)
     │
     └── "Media" → showLandingChoice('media')
           └── openMedia1()

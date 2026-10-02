@@ -17,7 +17,6 @@ function staticAssets() {
     './',
     'index.html',
     'offline.html',
-    'urls.html',
     'terms_of_service.txt',
     'manifest.json',
     'icon.png',
@@ -149,7 +148,6 @@ self.addEventListener('fetch', (event) => {
   const mutableSuffixes = [
     'index.html',
     'offline.html',
-    'urls.html',
     'terms_of_service.txt',
     'manifest.json',
     'data/games_merged.json',

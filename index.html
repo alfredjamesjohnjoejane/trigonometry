@@ -503,47 +503,33 @@
       display: none
     }
 
-    /* Corner icon links — small buttons, top-right of the landing page */
-    #dev-icon-link,
-    #chat-icon-link {
+    /* Padlet link — text button, top-right of the landing page */
+    #padlet-link {
       position: absolute;
       top: 24px;
+      right: 24px;
       z-index: 20;
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 52px;
-      height: 52px;
-      padding: 10px;
+      padding: 10px 20px;
       background: rgba(30, 30, 30, 0.6);
       border: 1px solid var(--border);
       border-radius: 16px;
       box-shadow: var(--shadow-sm);
+      color: var(--text-primary);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      text-decoration: none;
       opacity: 0.5;
       transition: opacity .25s ease, transform .25s ease, box-shadow .25s ease, border-color .25s ease;
     }
-    #dev-icon-link { right: 24px; }
-    #chat-icon-link { right: 88px; }
-    #dev-icon-link:hover,
-    #dev-icon-link:focus-visible,
-    #chat-icon-link:hover,
-    #chat-icon-link:focus-visible {
+    #padlet-link:hover,
+    #padlet-link:focus-visible {
       opacity: 1;
       transform: scale(1.08);
       border-color: rgba(255, 255, 255, 0.3);
       box-shadow: var(--shadow-md), var(--shadow-glow);
-    }
-    #dev-icon-link img,
-    #chat-icon-link img {
-      width: 100%;
-      height: 100%;
-      object-fit: contain;
-      pointer-events: none;
-    }
-    /* The developer artwork ships light-on-dark, so it is flipped to match
-       the chat tile (dark glyph on a light square). */
-    #dev-icon-link img {
-      filter: invert(1);
     }
 
     .br,
@@ -1949,20 +1935,15 @@
 
   <!-- LANDING PAGE -->
   <div id="lp">
-    <a id="dev-icon-link" href="developers.html" title="Developers" aria-label="Developers">
-      <img src="icons/developericon.svg" alt="" />
-    </a>
-    <a id="chat-icon-link" href="https://padlet.com/iuoagukjegwet/jesherhead-s0241v68ne1tb191vlms"
-      target="_blank" rel="noopener noreferrer" title="Chat" aria-label="Chat">
-      <img src="icons/chaticon.svg" alt="" />
-    </a>
+    <a id="padlet-link" href="https://padlet.com/iuoagukjegwet/jesherhead-s0241v68ne1tb191vlms"
+      target="_blank" rel="noopener noreferrer" title="Padlet" aria-label="Padlet">Padlet</a>
     <div id="landing-actions" style="text-align:center;z-index:10">
       <h1 class="lt fx-liquid" role="img" aria-label="Jesherhead">Jesherhead</h1>
       <p class="ls fx-chrome" id="landing-subtext">The best HammerHeadHub fork</p>
       <div class="br">
         <button class="b3" onclick="showLandingChoice('settings','Settings')">Settings</button>
         <button class="b4" onclick="showTOSViewer()">TOS</button>
-        <button class="b1" style="width:auto;padding:1.25rem 2.5rem" onclick="window.location.href='urls.html'">URLs</button>
+        <button class="b1" style="width:auto;padding:1.25rem 2.5rem" onclick="window.open('https://padlet.com/iuoagukjegwet/jesherhead-s0241v68ne1tb191vlms','_blank','noopener,noreferrer')">Padlet</button>
       </div>
       <div class="br">
         <button class="b1" style="width:75%;padding:1.25rem 2.5rem" onclick="enterHub()">Continue →</button>

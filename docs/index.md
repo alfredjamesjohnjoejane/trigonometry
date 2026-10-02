@@ -72,8 +72,6 @@ src/
 | `public/sw.js` | Service worker (offline support, asset caching) |
 | `public/manifest.json` | PWA manifest |
 | `public/data/games_merged.json` | Game catalog (1000+ entries) |
-| `public/urls.html` | URL Marketplace page |
-| `public/developers.html` | Developer info page |
 | `public/offline.html` | Offline fallback page |
 | `public/terms_of_service.txt` | TOS text |
 | `worker/src/index.js` | Cloudflare Worker (URL Marketplace API) |

@@ -46,8 +46,6 @@ The `dist/` directory contains:
 - `sw.js` — Service worker with injected version
 - `manifest.json` — PWA manifest
 - `offline.html` — Offline fallback page
-- `urls.html` — URL Marketplace page
-- `developers.html` — Developer info page
 - `terms_of_service.txt` — TOS text
 - `data/games_merged.json` — Game catalog
 - `icons/` — PWA icons (various sizes)

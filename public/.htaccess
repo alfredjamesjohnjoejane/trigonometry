@@ -14,7 +14,7 @@
   Header append Cache-Control "public"
 </filesMatch>
 
-# HTML pages (index.html, urls.html, sw.js) must revalidate: stale HTML is how
+# HTML pages (index.html, sw.js) must revalidate: stale HTML is how
 # removed features kept running on returning visitors until they cleared data.
 <filesMatch "\.(html|json|txt)$">
   Header set Cache-Control "no-cache, must-revalidate"

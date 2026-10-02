@@ -151,7 +151,6 @@ The service worker provides offline support and asset caching.
 ```
 index.html
 offline.html
-urls.html
 terms_of_service.txt
 manifest.json
 icon.png

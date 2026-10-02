@@ -23,7 +23,7 @@ export function loadSettings(): void {
 
   // One-time migration: the old "cloak marketplace links" toggle was removed.
   // Stale clients may still have cloakMarketplace in localStorage; drop it so
-  // a cached urls.html copy can never read it back and cloak links again.
+  // a cached page copy can never read it back and cloak links again.
   ST.remove('cloakMarketplace');
   // Removed feature: onlinegames.io toggle was deleted. Purge the stale key
   // so old clients self-heal without clearing data.
