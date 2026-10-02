@@ -67,11 +67,15 @@ This build ID is injected into `sw.js` replacing `{{VERSION}}`, ensuring the ser
 
 ```ts
 // vite.config.ts
-base: mode === 'production' || mode === 'analyze' ? '/jesherhead/' : '/'
+base: mode === 'production' || mode === 'analyze' ? './' : '/'
 ```
 
 - **Dev mode**: Base URL is `/` (served from localhost:3000)
-- **Production**: Base URL is `/jesherhead/` (GitHub Pages project site)
+- **Production**: Relative base (`./`) — every asset URL is resolved against
+  the page, so the same build works on a GitHub Pages project site
+  (`/<repo>/`), a custom domain at the root, and `vite preview`. A hardcoded
+  `/jesherhead/` 404s the moment the repo is renamed or forked, which leaves
+  the install gate stuck because the app bundle never loads.
 - **Analyze mode**: Same as production, plus bundle visualizer
 
 ## TypeScript Configuration
@@ -117,7 +121,7 @@ Test files are co-located with source: `src/**/*.test.ts`
 2. Go to repo Settings → Pages
 3. Source: "Deploy from a branch"
 4. Branch: `main`, folder: `/ (root)`
-5. Save — site is live at `https://<username>.github.io/jesherhead/`
+5. Save — site is live at `https://<username>.github.io/<repo>/`
 
 ## Cloudflare Worker Deployment
 

@@ -1,7 +1,7 @@
 const CACHE_NAME = 'jesherhead-v{{VERSION}}';
 const IMAGE_CACHE_NAME = 'jesherhead-images-v{{VERSION}}';
 // Asset paths are derived from the worker's own scope (registration scope
-// ends with the base: '/' in dev, '/jesherhead/' in production) instead of a
+// ends with the base: '/' in dev, '/<repo>/' in production) instead of a
 // hardcoded prefix, so the precache list works in every environment.
 function scopeBase() {
   try {
