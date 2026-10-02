@@ -166,4 +166,20 @@ describe('PWA install gate', () => {
     expect(gate().style.display).toBe('flex');
     expect(localStorage.getItem('pwaInstalled')).toBeNull();
   });
+
+  it('leaves DevTools (F12) usable while the gate is up, blocks it after', async () => {
+    expect(gate().style.display).toBe('flex');
+
+    const onGate = new KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
+    document.dispatchEvent(onGate);
+    expect(onGate.defaultPrevented).toBe(false);
+
+    window.dispatchEvent(new Event('appinstalled'));
+    await flush();
+    expect(gate().style.display).toBe('none');
+
+    const installed = new KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
+    document.dispatchEvent(installed);
+    expect(installed.defaultPrevented).toBe(true);
+  });
 });

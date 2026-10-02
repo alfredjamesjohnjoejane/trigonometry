@@ -39,6 +39,20 @@ A passive deterrent that makes DevTools usage annoying without breaking the app:
 
 If the user's configured panic key (default `` ` ``) is pressed without modifiers, it is never blocked by the security handler — the panic redirect always works.
 
+### Install Gate Exception
+
+While the PWA install gate (`#pwa-enforce-overlay`) covers the page, the
+**DevTools openers** are let through: F12, Ctrl/Cmd+Shift+I/J/C/K/E/M/P and
+Cmd+Opt+I/J/C/U. The app behind the gate is still locked, so there is nothing
+to protect yet — and a gate that refuses to dismiss has to be inspectable.
+
+- Right-click / ContextMenu, Shift+F10, view-source and save-page stay blocked
+- The passive deterrent skips its `debugger` pause and console wipe while the
+  gate is up, otherwise it would sabotage the DevTools session it just allowed
+- Once the gate drops (installed / standalone), protection resumes unchanged
+- `isInstallGateVisible()` implements this check in `src/security/index.ts`,
+  and the inline head script mirrors it
+
 ### Deterrent Mechanism
 
 ```ts

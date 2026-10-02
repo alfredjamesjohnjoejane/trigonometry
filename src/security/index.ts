@@ -11,6 +11,46 @@ export interface SecurityOptions {
   deterrent?: boolean;
 }
 
+/** Element id of the PWA "install the app" gate. */
+const GATE_ID = 'pwa-enforce-overlay';
+
+/**
+ * True for shortcuts that OPEN DevTools — F12, Ctrl/Cmd+Shift+<devtools> and
+ * Cmd+Opt+<devtools>. Excludes the context menu, view-source and save-page,
+ * which `isDevtoolsShortcut` blocks on top of this set.
+ */
+export function opensDevtools(e: KeyboardEvent): boolean {
+  const key = (e.key ?? '').toUpperCase();
+  const keyCode = (e as KeyboardEvent & { keyCode?: number }).keyCode ?? 0;
+
+  if (e.key === 'F12' || keyCode === 123) return true;
+
+  const ctrlOrCmd = e.ctrlKey || e.metaKey;
+  if (ctrlOrCmd && e.shiftKey && DEVTOOLS_SHIFT_KEYS.has(key)) return true;
+  if (e.metaKey && e.altKey && MAC_DEVTOOLS_KEYS.has(key)) return true;
+
+  return false;
+}
+
+/**
+ * True while the PWA install gate is covering the page. The app behind it is
+ * still locked, so there is nothing to protect there — and a gate that will
+ * not go away has to be debuggable. Detection never throws: an error here
+ * would fall back to "gate not visible" and keep blocking.
+ */
+export function isInstallGateVisible(): boolean {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return false;
+  try {
+    const gate = document.getElementById(GATE_ID);
+    if (!gate) return false;
+    const style = window.getComputedStyle(gate);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    return style.opacity === '' || Number.parseFloat(style.opacity) !== 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Pure matcher: returns true when the keyboard event is a well-known
  * DevTools / view-source / page-save shortcut.
@@ -23,19 +63,19 @@ export interface SecurityOptions {
  *
  * Deliberately NOT blocked: copy/paste/find (Ctrl+C/V/F/X/A),
  * print (Ctrl+P), refresh (F5/Ctrl+R)  -  blocking those breaks normal use.
+ *
+ * While the install gate is up, `handleSecurityKeydown` additionally lets the
+ * DevTools openers through (see `opensDevtools`).
  */
 export function isDevtoolsShortcut(e: KeyboardEvent): boolean {
-  const key = (e.key ?? '').toUpperCase();
-  const keyCode = (e as KeyboardEvent & { keyCode?: number }).keyCode ?? 0;
+  if (opensDevtools(e)) return true;
 
-  if (e.key === 'F12' || keyCode === 123) return true;
+  const key = (e.key ?? '').toUpperCase();
+
   if (e.key === 'ContextMenu') return true;
   if (e.key === 'F10' && e.shiftKey) return true;
 
   const ctrlOrCmd = e.ctrlKey || e.metaKey;
-
-  if (ctrlOrCmd && e.shiftKey && DEVTOOLS_SHIFT_KEYS.has(key)) return true;
-  if (e.metaKey && e.altKey && MAC_DEVTOOLS_KEYS.has(key)) return true;
   if (ctrlOrCmd && !e.shiftKey && !e.altKey && (key === 'U' || key === 'S')) return true;
 
   return false;
@@ -56,6 +96,11 @@ function getSavedPanicKey(): string {
  */
 export function handleSecurityKeydown(e: KeyboardEvent): boolean {
   if (!isDevtoolsShortcut(e)) return false;
+  // DevTools openers (F12, Ctrl/Cmd+Shift+I/J/C, …) go through while the PWA
+  // install gate covers the page: the app is still locked behind it, so there
+  // is nothing to protect yet, and a gate that will not dismiss must be
+  // inspectable. Right-click / view-source / save stay blocked as usual.
+  if (opensDevtools(e) && isInstallGateVisible()) return false;
   if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === getSavedPanicKey()) {
     return false;
   }
@@ -101,6 +146,10 @@ function printConsoleWarning(): void {
 function startDevtoolsDeterrent(): void {
   printConsoleWarning();
   window.setInterval(() => {
+    // Nothing to deter while the PWA install gate covers the page — and the
+    // `debugger` pause / console wipe would make F12 useless exactly where it
+    // is deliberately allowed.
+    if (isInstallGateVisible()) return;
     const start = performance.now();
     // eslint-disable-next-line no-debugger
     debugger;

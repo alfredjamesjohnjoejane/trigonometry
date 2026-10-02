@@ -1,6 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   isDevtoolsShortcut,
+  opensDevtools,
+  isInstallGateVisible,
   handleSecurityKeydown,
   handleSecurityContextMenu,
   installDevtoolsProtection,
@@ -108,5 +110,68 @@ describe('installDevtoolsProtection', () => {
     const e = new KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
     document.dispatchEvent(e);
     expect(e.defaultPrevented).toBe(true);
+  });
+});
+
+describe('install gate exemption', () => {
+  function showGate(style = 'display:flex'): void {
+    const gate = document.createElement('div');
+    gate.id = 'pwa-enforce-overlay';
+    gate.setAttribute('style', style);
+    document.body.appendChild(gate);
+  }
+
+  afterEach(() => {
+    document.getElementById('pwa-enforce-overlay')?.remove();
+  });
+
+  it('recognises when the install gate covers the page', () => {
+    expect(isInstallGateVisible()).toBe(false);
+    showGate();
+    expect(isInstallGateVisible()).toBe(true);
+    document.getElementById('pwa-enforce-overlay')!.style.display = 'none';
+    expect(isInstallGateVisible()).toBe(false);
+  });
+
+  it('allows F12 and other DevTools openers while the gate is visible', () => {
+    showGate();
+    expect(isInstallGateVisible()).toBe(true);
+
+    const f12 = keyEvent({ key: 'F12', cancelable: true });
+    expect(opensDevtools(f12)).toBe(true);
+    expect(handleSecurityKeydown(f12)).toBe(false);
+    expect(f12.defaultPrevented).toBe(false);
+
+    for (const combo of [
+      { key: 'I', ctrlKey: true, shiftKey: true },
+      { key: 'j', ctrlKey: true, shiftKey: true },
+      { key: 'C', metaKey: true, shiftKey: true },
+      { key: 'i', metaKey: true, altKey: true },
+    ]) {
+      const e = keyEvent({ ...combo, cancelable: true });
+      expect(handleSecurityKeydown(e)).toBe(false);
+      expect(e.defaultPrevented).toBe(false);
+    }
+  });
+
+  it('keeps blocking F12 once the gate is gone (installed / standalone)', () => {
+    showGate('display:none');
+    expect(isInstallGateVisible()).toBe(false);
+
+    const e = keyEvent({ key: 'F12', cancelable: true });
+    expect(handleSecurityKeydown(e)).toBe(true);
+    expect(e.defaultPrevented).toBe(true);
+  });
+
+  it('still blocks context menu and view-source while the gate is visible', () => {
+    showGate();
+
+    const menu = keyEvent({ key: 'ContextMenu', cancelable: true });
+    expect(handleSecurityKeydown(menu)).toBe(true);
+    expect(menu.defaultPrevented).toBe(true);
+
+    const viewSource = keyEvent({ key: 'u', ctrlKey: true, cancelable: true });
+    expect(handleSecurityKeydown(viewSource)).toBe(true);
+    expect(viewSource.defaultPrevented).toBe(true);
   });
 });

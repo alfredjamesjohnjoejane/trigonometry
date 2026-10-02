@@ -31,7 +31,34 @@
       try {
         var SHIFT_KEYS = { I: 1, J: 1, C: 1, K: 1, E: 1, M: 1, P: 1 };
         var MAC_KEYS = { I: 1, J: 1, C: 1, U: 1 };
+        // DevTools openers (mirrors opensDevtools() in src/security/index.ts).
+        function opensDevtools(e) {
+          var k = (e.key || '').toUpperCase();
+          var mod = e.ctrlKey || e.metaKey;
+          if (e.key === 'F12' || e.keyCode === 123) return true;
+          if (mod && e.shiftKey && SHIFT_KEYS[k]) return true;
+          if (e.metaKey && e.altKey && MAC_KEYS[k]) return true;
+          return false;
+        }
+        // True while the PWA install gate covers the page. The app behind it
+        // is still locked, so DevTools is allowed there — a gate that will not
+        // dismiss has to be inspectable.
+        function installGateUp() {
+          try {
+            var gate = document.getElementById('pwa-enforce-overlay');
+            if (!gate || !window.getComputedStyle) return false;
+            var s = window.getComputedStyle(gate);
+            return (
+              s.display !== 'none' &&
+              s.visibility !== 'hidden' &&
+              (s.opacity === '' || parseFloat(s.opacity) !== 0)
+            );
+          } catch (err) {
+            return false;
+          }
+        }
         function isBlocked(e) {
+          if (opensDevtools(e) && installGateUp()) return false;
           var k = (e.key || '').toUpperCase();
           if (e.key === 'F12' || e.keyCode === 123) return true;
           if (e.key === 'ContextMenu') return true;
