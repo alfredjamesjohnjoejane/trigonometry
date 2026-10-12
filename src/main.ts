@@ -21,11 +21,18 @@ import {
   syncPWAInstallUI,
 } from './ui/index.js';
 import { setupBlockedUrlGuards, scrubPortedLinks, showErrorToast } from './utils/index.js';
+import {
+  installDiagGlobals,
+  installLogCapture,
+  showDiagnosticsPanel,
+} from './diagnostics/index.js';
 
 // Install as early as possible (module evaluation, before DOMContentLoaded)
 // so shortcuts / right-click are blocked from the first paint.
 installDevtoolsProtection();
 initAnalytics();
+installLogCapture();
+installDiagGlobals();
 
 // Install-signal listeners live at module scope, NOT inside the boot handler:
 // `beforeinstallprompt` can fire while the document is still parsing and
@@ -82,6 +89,22 @@ function boot(): void {
   initHomepageTest();
   initViewFromHash();
   window.addEventListener('hashchange', initViewFromHash);
+  // School-WiFi debugging entry points (work even with DevTools blocked):
+  //   ?diag=1          auto-opens the diagnostics panel
+  //   Ctrl+Shift+D     opens it from anywhere
+  try {
+    if (new URLSearchParams(location.search).get('diag') === '1') {
+      setTimeout(() => showDiagnosticsPanel(), 800);
+    }
+    document.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+        e.preventDefault();
+        showDiagnosticsPanel();
+      }
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 // Boot even if this module evaluated after DOMContentLoaded already fired

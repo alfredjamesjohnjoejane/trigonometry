@@ -1,0 +1,156 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  classifyFailure,
+  describeError,
+  formatReportText,
+  getEnvironmentSnapshot,
+  guessLikelyCause,
+  _resetLogs,
+  type DiagReport,
+  type ProbeResult,
+} from './index.js';
+
+function probe(name: string, ok: boolean, extra: Partial<ProbeResult> = {}): ProbeResult {
+  return {
+    name,
+    url: 'https://example.com/x',
+    method: 'fetch-cors',
+    ok,
+    httpStatus: ok ? 200 : null,
+    ms: ok ? 120 : null,
+    errorName: ok ? null : 'TypeError',
+    errorMessage: ok ? null : 'Failed to fetch',
+    classification: ok ? 'ok' : 'network-blocked-or-filtered',
+    note: null,
+    ...extra,
+  };
+}
+
+function baseReport(): DiagReport {
+  return {
+    version: 1,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    env: getEnvironmentSnapshot(),
+    probes: [],
+    lumin: {
+      attempted: false,
+      present: false,
+      initType: 'undefined',
+      ok: false,
+      errorName: null,
+      errorMessage: null,
+      ms: null,
+    },
+    recentLogs: [],
+    likelyCause: 'test',
+    checklist: ['step 1'],
+  };
+}
+
+beforeEach(() => {
+  _resetLogs();
+  vi.unstubAllGlobals();
+});
+
+describe('describeError', () => {
+  it('handles null, strings, and Errors', () => {
+    expect(describeError(null)).toBe('null');
+    expect(describeError('oops')).toBe('oops');
+    expect(describeError(new TypeError('bad'))).toContain('TypeError');
+  });
+});
+
+describe('classifyFailure', () => {
+  it('classifies aborts as timeout', () => {
+    expect(classifyFailure(new DOMException('aborted', 'AbortError'), 8100)).toMatch(/timeout/);
+  });
+
+  it('reports offline when navigator is offline', () => {
+    vi.stubGlobal('navigator', { onLine: false });
+    expect(classifyFailure(new TypeError('Failed to fetch'), 50)).toBe('offline');
+  });
+
+  it('flags CSP messages', () => {
+    expect(classifyFailure(new Error('Refused by Content Security Policy'), 10)).toBe(
+      'csp-blocked'
+    );
+  });
+
+  it('defaults cross-origin TypeError to filter bucket', () => {
+    expect(classifyFailure(new TypeError('Failed to fetch'), 100)).toBe(
+      'network-blocked-or-filtered'
+    );
+  });
+});
+
+describe('guessLikelyCause', () => {
+  it('detects offline / captive portal when everything fails', () => {
+    const cause = guessLikelyCause(
+      [probe('same-origin: catalog', false), probe('cdn: jsDelivr', false)],
+      {
+        attempted: false,
+        present: false,
+        initType: 'undefined',
+        ok: false,
+        errorName: null,
+        errorMessage: null,
+        ms: null,
+      }
+    );
+    expect(cause).toMatch(/OFFLINE-or-captive-portal/);
+  });
+
+  it('detects school filter when same-origin passes but CDN fails', () => {
+    const cause = guessLikelyCause(
+      [probe('same-origin: catalog', true), probe('cdn: jsDelivr', false)],
+      {
+        attempted: false,
+        present: false,
+        initType: 'undefined',
+        ok: false,
+        errorName: null,
+        errorMessage: null,
+        ms: null,
+      }
+    );
+    expect(cause).toMatch(/SCHOOL-FILTER/);
+  });
+
+  it('detects Lumin.init rejection', () => {
+    const cause = guessLikelyCause(
+      [probe('same-origin: catalog', true), probe('cdn: jsDelivr', true)],
+      {
+        attempted: true,
+        present: true,
+        initType: 'function',
+        ok: false,
+        errorName: 'Error',
+        errorMessage: 'backend blocked',
+        ms: 300,
+      }
+    );
+    expect(cause).toMatch(/LUMIN-INIT failed/);
+  });
+});
+
+describe('formatReportText', () => {
+  it('renders a pasteable report with probes and cause', () => {
+    const r = baseReport();
+    r.probes = [probe('same-origin: catalog', true), probe('cdn: jsDelivr', false)];
+    r.likelyCause = 'SCHOOL-FILTER guess';
+    const text = formatReportText(r);
+    expect(text).toContain('diagnostic report');
+    expect(text).toContain('LIKELY CAUSE');
+    expect(text).toContain('PASS');
+    expect(text).toContain('FAIL');
+  });
+});
+
+describe('getEnvironmentSnapshot', () => {
+  it('never throws and returns required fields', () => {
+    const env = getEnvironmentSnapshot();
+    expect(typeof env.href).toBe('string');
+    expect(typeof env.onLine).toBe('boolean');
+    expect(typeof env.luminGlobal).toBe('string');
+  });
+});

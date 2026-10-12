@@ -30,6 +30,17 @@ import {
 } from '../utils/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
 import ST from '../storage/index.js';
+import {
+  classifyFailure,
+  copyReportText,
+  describeError,
+  getEnvironmentSnapshot,
+  installDiagGlobals,
+  installLogCapture,
+  saveLastReport,
+  showDiagnosticsPanel,
+  type DiagReport,
+} from '../diagnostics/index.js';
 
 const MEDIA_ICON =
   'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48dGV4dCB5PSIuOWVtIiBmb250LXNpemU9IjkwIj7iiJ48L3RleHQ+PC9zdmc+';
@@ -651,36 +662,157 @@ function initHomepageTest(): void {
   if (!mount) return;
   if (mount.dataset.ready === '1') return;
   mount.dataset.ready = '1';
-  const fail = () => {
+  installLogCapture();
+  installDiagGlobals();
+  const fail = (rawErr?: unknown) => {
     mount.dataset.ready = '0';
     mount.textContent = '';
+    const errText = rawErr === undefined ? '' : describeError(rawErr);
+    const errName =
+      rawErr instanceof Error ? rawErr.name : rawErr === undefined ? '' : typeof rawErr;
+    let classification = 'unknown';
+    try {
+      classification = classifyFailure(rawErr ?? new TypeError('homepage failed to load'), null);
+    } catch {
+      /* ignore */
+    }
+    // Persist a lightweight failure snapshot immediately: full probes run on
+    // demand via the Diagnose button (they take 10-30s on school WiFi).
+    let failureCode = '';
+    try {
+      const env = getEnvironmentSnapshot();
+      failureCode = `F-${Date.now().toString(36).toUpperCase()}`;
+      const partial: DiagReport = {
+        version: 1,
+        createdAt: env.timestamp,
+        env,
+        probes: [],
+        lumin: {
+          attempted: true,
+          present: env.luminGlobal !== 'missing',
+          initType: env.luminGlobal,
+          ok: false,
+          errorName: errName || null,
+          errorMessage: errText.slice(0, 500) || null,
+          ms: null,
+        },
+        recentLogs: [],
+        likelyCause: `Homepage mount failed [${classification}]. Press "Diagnose connection" on school WiFi for the full probe battery.`,
+        checklist: [
+          'Press "🔍 Diagnose connection" below while still on the school network.',
+          'Press "📋 Copy report" in the panel and save it — the failure code ties the two together.',
+        ],
+      };
+      saveLastReport(partial);
+    } catch {
+      /* diagnostics must never break the failure UI */
+    }
+    try {
+      console.error('[HomepageTest] failed:', {
+        error: errText || '(no detail — script onerror or init never resolved)',
+        classification,
+        failureCode,
+        online: navigator.onLine,
+      });
+    } catch {
+      /* ignore */
+    }
     const div = document.createElement('div');
-    div.style.cssText = 'color:#e0e0e0;padding:24px;text-align:center';
-    div.textContent = 'Test homepage failed to load';
-    const retry = document.createElement('button');
-    retry.textContent = 'Retry';
-    retry.style.cssText =
-      'margin-top:12px;background:#444;color:#fff;border:none;border-radius:10px;padding:8px 16px;cursor:pointer';
+    div.style.cssText =
+      'color:#e0e0e0;padding:24px;text-align:center;max-width:640px;margin:0 auto';
+    const head = document.createElement('div');
+    head.style.cssText = 'font-weight:800;font-size:1.05rem;margin-bottom:8px';
+    head.textContent = 'Test homepage failed to load';
+    const detail = document.createElement('div');
+    detail.style.cssText =
+      'font-size:.8rem;color:#999;line-height:1.6;margin-bottom:6px;word-break:break-word';
+    const onlineTxt = (() => {
+      try {
+        return navigator.onLine ? 'online' : 'OFFLINE';
+      } catch {
+        return 'unknown';
+      }
+    })();
+    detail.textContent =
+      (errText ? `Error: ${errText.slice(0, 220)} · ` : 'No error detail captured · ') +
+      `cause: ${classification} · browser: ${onlineTxt}` +
+      (failureCode ? ` · code ${failureCode}` : '');
+    const hint = document.createElement('div');
+    hint.style.cssText = 'font-size:.78rem;color:#777;margin-bottom:12px;line-height:1.5';
+    hint.textContent =
+      'School WiFi often blocks the game CDN. Press Diagnose while still at school — it tests this site, the CDN, and Lumin, then builds a copyable report.';
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:4px';
+    const mkBtn = (label: string, primary: boolean): HTMLButtonElement => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = primary
+        ? 'background:#444;color:#fff;border:none;border-radius:10px;padding:8px 16px;cursor:pointer;font-weight:700'
+        : 'background:rgba(255,255,255,.08);color:#e0e0e0;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 16px;cursor:pointer';
+      return b;
+    };
+    const retry = mkBtn('Retry', true);
     retry.addEventListener('click', () => {
       mount.dataset.ready = '';
       initHomepageTest();
     });
-    div.appendChild(document.createElement('br'));
-    div.appendChild(retry);
+    const diag = mkBtn('🔍 Diagnose connection', false);
+    diag.addEventListener('click', () => {
+      const overlay = showDiagnosticsPanel();
+      // Auto-start the probe battery so one click is enough at school.
+      const runBtn = overlay.querySelector('button');
+      runBtn?.dispatchEvent(new Event('click'));
+    });
+    const copy = mkBtn('📋 Copy failure', false);
+    copy.addEventListener('click', () => {
+      const text =
+        `Test homepage failed to load${failureCode ? ` [${failureCode}]` : ''}\n` +
+        `error: ${errText || '(none captured)'}\n` +
+        `classification: ${classification}\n` +
+        `browser online: ${onlineTxt}\n` +
+        `time: ${new Date().toISOString()}\n` +
+        `page: ${location.href}\n` +
+        `Tip: press Diagnose connection for the full network report.`;
+      void copyReportText(text).then(ok => {
+        copy.textContent = ok ? '✓ Copied' : 'Copy failed — screenshot instead';
+        setTimeout(() => (copy.textContent = '📋 Copy failure'), 2500);
+      });
+    });
+    row.append(retry, diag, copy);
+    div.append(head, detail, hint, row);
     mount.appendChild(div);
   };
   const start = () => {
     // Lumin.init returns a promise that rejects when the SDK boot fails
     // (e.g. its fetched-code Function() evaluation is blocked). Catch async
     // rejections too — try/catch alone left a silent empty mount.
+    // A hang guard catches the school-WiFi case where init neither resolves
+    // nor rejects (backend request swallowed by the filter).
+    let settled = false;
+    const failOnce = (e?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hangTimer);
+      fail(e);
+    };
+    const hangTimer = setTimeout(
+      () => failOnce(new DOMException('Lumin.init timed out after 20s', 'AbortError')),
+      20000
+    );
     try {
       const r = (window as unknown as { Lumin?: { init: (o: unknown) => unknown } }).Lumin?.init({
         container: mount,
         theme: 'dark',
       });
-      Promise.resolve(r).catch(() => fail());
-    } catch {
-      fail();
+      Promise.resolve(r).then(
+        () => {
+          settled = true;
+          clearTimeout(hangTimer);
+        },
+        e => failOnce(e)
+      );
+    } catch (e) {
+      failOnce(e);
     }
   };
   const w = window as unknown as { Lumin?: { init: (o: unknown) => void } };
@@ -691,7 +823,16 @@ function initHomepageTest(): void {
   const existing = document.getElementById('lumin-script');
   if (existing) {
     existing.addEventListener('load', start, { once: true });
-    existing.addEventListener('error', fail, { once: true });
+    existing.addEventListener(
+      'error',
+      () =>
+        fail(
+          new TypeError(
+            `lumin.min.js script tag failed to load (src=${(existing as HTMLScriptElement).src || LUMIN_SDK_URL})`
+          )
+        ),
+      { once: true }
+    );
     return;
   }
   const s = document.createElement('script');
@@ -702,7 +843,8 @@ function initHomepageTest(): void {
     s.crossOrigin = 'anonymous';
   }
   s.onload = start;
-  s.onerror = fail;
+  s.onerror = () =>
+    fail(new TypeError(`lumin.min.js script tag failed to load (src=${LUMIN_SDK_URL})`));
   document.body.appendChild(s);
 }
 
