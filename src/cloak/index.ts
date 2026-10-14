@@ -6,7 +6,7 @@ import {
   normalizeCloakUrl,
 } from '../types/index.js';
 import ST from '../storage/index.js';
-import { isSafeHttpUrl, stripHtmlMetachars } from '../utils/index.js';
+import { isSafeHttpUrl } from '../utils/index.js';
 
 const DEFAULT_CLOAK = {
   title: 'Google Classroom',
@@ -194,9 +194,12 @@ export function openAboutBlankShell(title: string, icon: string): AboutBlankShel
     // crafted `javascript:` URL can never become script execution.
     // stripHtmlMetachars is a global `<`/`'`/`"` replacement (a no-op for
     // legitimate favicon URLs), so the DOM-sourced value cannot reinterpret
-    // as markup at the sink (CodeQL js/xss-through-dom barrier).
+    // as markup at the sink (CodeQL js/xss-through-dom barrier). It must
+    // stay an inline StringReplaceCall: CodeQL only recognizes the sanitizer
+    // when the global < / ' / " regexp is syntactically visible at the sink,
+    // not hidden behind a helper import.
     const candidate = isSafeFaviconUrl(icon) ? icon : HAMMER_ICON;
-    const safeIcon = stripHtmlMetachars(candidate);
+    const safeIcon = candidate.replace(/[<>"']/g, '');
     iconEl.setAttribute('href', isSafeFaviconUrl(safeIcon) ? safeIcon : HAMMER_ICON);
     if (!d.querySelector('style[data-cloak-shell]')) {
       const st = d.createElement('style');
@@ -288,12 +291,16 @@ export function openLandingInAboutBlank(): void {
   // "normal" preset (no cloak) — stay on the hub instead of redirecting.
   if (!c.url) return;
   if (!isSafeHttpUrl(c.url)) return;
+  // Same inline sanitizer as above: c.url is storage/DOM-sourced text
+  // reaching URL sinks, so strip metacharacters inline before navigation.
+  const target = c.url.replace(/[<>"']/g, '');
+  if (!isSafeHttpUrl(target)) return;
   setTimeout(() => {
     try {
-      location.replace(c.url);
+      location.replace(target);
     } catch (e) {
       try {
-        location.href = c.url;
+        location.href = target;
       } catch (_e) {}
     }
   }, 300);
