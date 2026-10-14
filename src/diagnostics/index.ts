@@ -7,6 +7,9 @@
  *   2. Content filter blocking cdn.jsdelivr.net (same-origin OK, CDN fails)
  *   3. Filter blocking Lumin's backend while the CDN itself loads
  *      (script loads, but `Lumin.init()` rejects)
+ *   3b. Filter blocking the worker file (/v1/lumin.worker.js) while
+ *      /api/v1/boot stays reachable (script + boot pass, but init
+ *      fails with a Worker connection error)
  *   4. Slow/throttled WiFi (probes pass but take seconds)
  *   5. CSP / script-eval blocking (fetch passes, <script> or Lumin.init fails)
  *
@@ -16,7 +19,7 @@
  * throws — diagnostics must work especially when the network is broken.
  */
 
-import { CDN_TARGETS, LUMIN_BACKEND_TARGETS } from '../types/index.js';
+import { CDN_TARGETS, LUMIN_BACKEND_TARGETS, LUMIN_WORKER_FILE_TARGETS } from '../types/index.js';
 import ST from '../storage/index.js';
 
 export interface ProbeResult {
@@ -459,6 +462,7 @@ export function defaultProbeList(): Array<{ name: string; url: string }> {
   ];
   for (const t of CDN_TARGETS) list.push({ name: `cdn: ${t.name}`, url: t.url });
   for (const t of LUMIN_BACKEND_TARGETS) list.push({ name: `backend: ${t.name}`, url: t.url });
+  for (const t of LUMIN_WORKER_FILE_TARGETS) list.push({ name: `worker: ${t.name}`, url: t.url });
   list.push({ name: 'internet: google', url: 'https://www.google.com/favicon.ico' });
   return list;
 }
@@ -532,8 +536,10 @@ export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
     const luminPass = luminRows.filter(r => r.ok).length;
     const backendRows = results.filter(r => r.name.startsWith('backend:'));
     const backendPass = backendRows.filter(r => r.ok).length;
+    const workerRows = results.filter(r => r.name.startsWith('worker:'));
+    const workerPass = workerRows.filter(r => r.ok).length;
     console.log(
-      `[Diag] probe battery done: ${pass}/${results.length} pass, Lumin mirrors ${luminPass}/${luminRows.length} pass, backends ${backendPass}/${backendRows.length} pass`
+      `[Diag] probe battery done: ${pass}/${results.length} pass, Lumin mirrors ${luminPass}/${luminRows.length} pass, backends ${backendPass}/${backendRows.length} pass, worker files ${workerPass}/${workerRows.length} pass`
     );
   } catch {
     /* ignore */
@@ -661,6 +667,12 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
     (lumin.present || luminOk.length > 0)
   )
     return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail, including the worker proxy. Boot fetches are routed via the proxy with direct fallback — if the proxy row also fails, the proxy host itself is filtered. Allowlist the worker origin or a.luminsdk.com/api/v1/boot, or use another network.';
+  const workerProbes = probes.filter(
+    p => p.name.startsWith('worker:') && !p.name.includes('no-cors')
+  );
+  const workerAnyOk = probes.some(p => p.name.startsWith('worker:') && p.ok);
+  if (sameOriginOk && workerProbes.length > 0 && !workerAnyOk && lumin.present && backendAnyOk)
+    return 'LUMIN-WORKER-BLOCKED: the script and backend boot hosts load, but ALL /v1/lumin.worker.js file fetches fail, including the worker proxy. Lumin.init fetches the worker file before creating its Worker ("Worker connection failed: domain fetch failed"). Worker fetches are routed via the /lumin/worker proxy with direct fallback — if the proxy row also fails, the proxy host itself is filtered. Allowlist the worker origin, or use another network.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
   if (lumin.present && lumin.attempted && !lumin.ok)
@@ -681,15 +693,20 @@ export function buildChecklist(report: DiagReport): string[] {
     p => p.name.startsWith('backend:') && !p.name.includes('no-cors')
   );
   const backendOk = backendProbes.filter(p => p.ok).length;
+  const workerProbes = report.probes.filter(
+    p => p.name.startsWith('worker:') && !p.name.includes('no-cors')
+  );
+  const workerOk = workerProbes.filter(p => p.ok).length;
   return [
     `1. Browser online flag: ${report.env.onLine ? 'ONLINE' : 'OFFLINE'} — if OFFLINE, rejoin WiFi / accept the captive portal.`,
     `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net + the worker proxy. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
     '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; the same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store are the fix — check they appear in the mirror rows.',
     `4. Script loads but backend rows all fail => Lumin boot hosts are filtered (backends passing now: ${backendOk}/${backendProbes.length}). The worker proxy row (/lumin/boot) should pass first; if it fails too, allowlist the worker origin or a.luminsdk.com/api/v1/boot.`,
-    '5. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
-    '6. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
-    '7. Loader runs a staggered race (IDB last-good + vendor immediately, worker proxy ~1.2s, then POPs every 1.2s); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror [tag|fetch-blob|idb] breakdown.',
-    '8. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
+    `5. Script + backends pass but worker-file rows all fail => the /v1/lumin.worker.js path is filtered (worker files passing now: ${workerOk}/${workerProbes.length}). The /lumin/worker proxy row should pass first; the page now routes worker fetches through it automatically — if it fails too, allowlist the worker origin.`,
+    '6. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
+    '7. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
+    '8. Loader runs a staggered race (IDB last-good + vendor immediately, worker proxy ~1.2s, then POPs every 1.2s); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror [tag|fetch-blob|idb] breakdown.',
+    '9. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
   ];
 }
 
@@ -819,6 +836,15 @@ export function formatReportText(r: DiagReport): string {
     const okRows = backendRows.filter(p => p.ok);
     lines.push(`--- lumin backends (${okRows.length}/${backendRows.length} reachable) ---`);
     for (const p of backendRows) {
+      lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
+    }
+    lines.push('');
+  }
+  const workerRows = r.probes.filter(p => p.name.startsWith('worker:'));
+  if (workerRows.length) {
+    const okRows = workerRows.filter(p => p.ok);
+    lines.push(`--- lumin worker files (${okRows.length}/${workerRows.length} reachable) ---`);
+    for (const p of workerRows) {
       lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
     }
     lines.push('');

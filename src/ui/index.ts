@@ -35,6 +35,7 @@ import {
 } from '../utils/index.js';
 import { getLuminScript, saveLuminScript } from '../lumin-store/index.js';
 import { installLuminBootProxy } from '../lumin-boot-proxy/index.js';
+import { installLuminWorkerProxy } from '../lumin-worker-proxy/index.js';
 import { createRaceTracker } from '../lumin-race/tracker.js';
 import { getCacheSize } from '../cache/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
@@ -1256,10 +1257,15 @@ function initHomepageTest(): void {
     start();
     return;
   }
-  // Route the stub's boot fetches through the worker proxy (direct fallback
-  // on proxy failure). Installed once per page; must precede any Lumin.init.
+  // Route the stub's boot + worker-file fetches through the worker proxy
+  // (direct fallback on proxy failure). Installed once per page; must precede
+  // any Lumin.init. The worker-file patch matters on school WiFi: after the
+  // boot JSON loads, Lumin.init fetches /v1/lumin.worker.js from each boot
+  // host, and that path can be filtered while /api/v1/boot stays reachable
+  // ("Worker connection failed: domain fetch failed").
   try {
     installLuminBootProxy();
+    installLuminWorkerProxy();
   } catch {
     /* diagnostics must never break loading */
   }

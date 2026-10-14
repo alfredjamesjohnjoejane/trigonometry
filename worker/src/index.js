@@ -88,6 +88,17 @@ const POSTHOG_UPSTREAM = 'https://us.i.posthog.com';
 // vendor -> worker proxy -> jsDelivr POPs in a staggered race.
 const LUMIN_SCRIPT_UPSTREAM =
   'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
+// Lumin worker file upstreams. Lumin.init fetches /v1/lumin.worker.js from
+// each boot host before creating its Worker; school filters that 503 the
+// jsDelivr SDK path can block this path too while /api/v1/boot stays
+// reachable, so it gets the same proxy treatment as the script.
+const LUMIN_WORKER_UPSTREAMS = [
+  'https://a.luminsdk.com/v1/lumin.worker.js',
+  'https://drkesten.com/v1/lumin.worker.js',
+  'https://milpagan.org/v1/lumin.worker.js',
+  'https://catholicrebuttals.com/v1/lumin.worker.js',
+  'https://instructure-ramen.hpsschools.org/v1/lumin.worker.js',
+];
 const LUMIN_BOOT_UPSTREAMS = [
   'https://a.luminsdk.com/api/v1/boot',
   'https://drkesten.com/api/v1/boot',
@@ -730,6 +741,45 @@ async function proxyLuminScript() {
   return new Response(body, { status: 200, headers });
 }
 
+// GET /lumin/worker -> first healthy LUMIN_WORKER_UPSTREAMS host
+// (all serve the same ~70KB lumin.worker.js; verified 2026-10-14).
+// Same edge-cache shape as /lumin/script: the bytes only change when the SDK
+// ships, and the client falls back to the direct host on proxy failure.
+async function proxyLuminWorker() {
+  for (const upstream of LUMIN_WORKER_UPSTREAMS) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 10000);
+      let res;
+      try {
+        res = await fetch(upstream, {
+          signal: ctrl.signal,
+          redirect: 'follow',
+          headers: { 'User-Agent': 'jesherhead-lumin-proxy' },
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) continue;
+      const body = await res.arrayBuffer().catch(() => null);
+      if (!body || body.byteLength < 20000) continue;
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/javascript; charset=utf-8');
+      headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+      headers.set('X-Lumin-Upstream', upstream);
+      const cors = luminCorsHeaders();
+      for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+      return new Response(body, { status: 200, headers });
+    } catch (err) {
+      continue;
+    }
+  }
+  return jsonOpen(
+    { error: 'All Lumin worker upstreams unreachable.', upstreams: LUMIN_WORKER_UPSTREAMS.length },
+    502
+  );
+}
+
 // ANY /lumin/boot[?t=...] -> first healthy LUMIN_BOOT_UPSTREAMS host.
 // The stub appends ?t= at runtime; pass method/query/body through untouched
 // and rotate upstreams so one filtered host does not fail the request.
@@ -788,7 +838,9 @@ export default {
       url.pathname === '/lumin/script' ||
       url.pathname.startsWith('/lumin/script/') ||
       url.pathname === '/lumin/boot' ||
-      url.pathname.startsWith('/lumin/boot/');
+      url.pathname.startsWith('/lumin/boot/') ||
+      url.pathname === '/lumin/worker' ||
+      url.pathname.startsWith('/lumin/worker/');
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
@@ -803,7 +855,8 @@ export default {
       return proxyPosthog(request, url);
     }
 
-    // /lumin/* — Lumin SDK + boot proxy (see proxyLuminScript/proxyLuminBoot).
+    // /lumin/* — Lumin SDK + boot + worker-file proxy (see
+    // proxyLuminScript/proxyLuminBoot/proxyLuminWorker).
     // Handled before the GITHUB_TOKEN check so game loading never depends on
     // marketplace config.
     if (url.pathname === '/lumin/script' || url.pathname.startsWith('/lumin/script/')) {
@@ -811,6 +864,12 @@ export default {
         return jsonOpen({ error: 'Method not allowed.' }, 405);
       }
       return proxyLuminScript();
+    }
+    if (url.pathname === '/lumin/worker' || url.pathname.startsWith('/lumin/worker/')) {
+      if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS') {
+        return jsonOpen({ error: 'Method not allowed.' }, 405);
+      }
+      return proxyLuminWorker();
     }
     if (url.pathname === '/lumin/boot' || url.pathname.startsWith('/lumin/boot/')) {
       return proxyLuminBoot(request, url);

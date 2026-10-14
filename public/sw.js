@@ -14,6 +14,18 @@ const LUMIN_SCRIPT_URLS = [
   'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://url-marketplace.jesherhaed.workers.dev/lumin/script',
 ];
+// Worker files Lumin.init fetches (/v1/lumin.worker.js per boot host) before
+// creating its Worker. Same stale-while-revalidate treatment: a student who
+// loads once off-filter keeps a working copy for school WiFi, where this
+// path can be filtered while /api/v1/boot stays reachable.
+const LUMIN_WORKER_URLS = [
+  'https://url-marketplace.jesherhaed.workers.dev/lumin/worker',
+  'https://a.luminsdk.com/v1/lumin.worker.js',
+  'https://drkesten.com/v1/lumin.worker.js',
+  'https://milpagan.org/v1/lumin.worker.js',
+  'https://catholicrebuttals.com/v1/lumin.worker.js',
+  'https://instructure-ramen.hpsschools.org/v1/lumin.worker.js',
+];
 // Asset paths are derived from the worker's own scope (registration scope
 // ends with the base: '/' in dev, '/<repo>/' in production) instead of a
 // hardcoded prefix, so the precache list works in every environment.
@@ -77,10 +89,12 @@ self.addEventListener('install', (event) => {
         // who installs on filtered WiFi still gets the vendor copy via the
         // precache above; warming one CDN/worker copy here means the next
         // visit can serve stale-while-revalidate instantly. Never fails install.
+        // The /lumin/worker file is warmed too: Lumin.init needs it before it
+        // can create its Worker, and its path is filtered on some school WiFi.
         try {
           return caches.open(LUMIN_CACHE_NAME).then((luminCache) =>
             Promise.allSettled(
-              LUMIN_SCRIPT_URLS.slice(0, 2).map((u) =>
+              [...LUMIN_SCRIPT_URLS.slice(0, 2), ...LUMIN_WORKER_URLS.slice(0, 1)].map((u) =>
                 fetch(u)
                   .then((res) => {
                     if (!res.ok) return;
@@ -179,8 +193,10 @@ self.addEventListener('fetch', (event) => {
   // Lumin SDK scripts: stale-while-revalidate in the version-independent
   // cache. A student who loads once off-filter keeps working copies across
   // deploys; a fast stale response also beats throttled school WiFi while a
-  // background revalidate refreshes the entry.
-  if (LUMIN_SCRIPT_URLS.some((u) => u === url.href)) {
+  // background revalidate refreshes the entry. Covers both lumin.min.js and
+  // the /v1/lumin.worker.js files Lumin.init fetches before creating its
+  // Worker.
+  if (LUMIN_SCRIPT_URLS.some((u) => u === url.href) || LUMIN_WORKER_URLS.some((u) => u === url.href)) {
     event.respondWith(luminStaleWhileRevalidate(request));
     return;
   }

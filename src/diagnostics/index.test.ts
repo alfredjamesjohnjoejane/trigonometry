@@ -195,6 +195,29 @@ describe('guessLikelyCause', () => {
     expect(cause).toMatch(/LUMIN-BACKEND-BLOCKED/);
   });
 
+  it('detects worker-file block when scripts+backends pass but worker files fail', () => {
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: Lumin SDK', true),
+        probe('backend: Lumin backend (primary)', true),
+        probe('worker: Lumin worker (primary)', false),
+        probe('worker: Lumin worker (mirror 1)', false),
+        probe('worker: Lumin worker (proxy)', false),
+      ],
+      {
+        attempted: true,
+        present: true,
+        initType: 'function',
+        ok: false,
+        errorName: 'Error',
+        errorMessage: 'domain fetch failed',
+        ms: 5000,
+      }
+    );
+    expect(cause).toMatch(/LUMIN-WORKER-BLOCKED/);
+  });
+
   it('does not cry backend-blocked when a no-cors row shows the host alive', () => {
     const cause = guessLikelyCause(
       [

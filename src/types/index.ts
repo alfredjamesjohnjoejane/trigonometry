@@ -132,6 +132,33 @@ export const CDN_TARGETS: CDNTarget[] = [
 export const LUMIN_WORKER_ORIGIN = 'https://url-marketplace.jesherhaed.workers.dev';
 export const LUMIN_WORKER_SCRIPT_URL = `${LUMIN_WORKER_ORIGIN}/lumin/script`;
 export const LUMIN_WORKER_BOOT_URL = `${LUMIN_WORKER_ORIGIN}/lumin/boot`;
+// Lumin worker hosts (observed 2026-10-14: after a successful boot fetch,
+// Lumin.init fetches /v1/lumin.worker.js from each boot host in turn, then
+// creates its Worker. School filters that 503 the jsDelivr SDK path can also
+// block this path while leaving /api/v1/boot reachable — that is the
+// LUMIN-WORKER-BLOCKED case: script loads, boot hosts pass, init still fails
+// with "Worker connection failed: domain fetch failed").
+// Probed by diagnostics; the client fetch/XHR patch in
+// src/lumin-worker-proxy routes these through the worker proxy below.
+export const LUMIN_WORKER_FILE_TARGETS: CDNTarget[] = [
+  {
+    name: 'Lumin worker (proxy)',
+    url: 'https://url-marketplace.jesherhaed.workers.dev/lumin/worker',
+  },
+  { name: 'Lumin worker (primary)', url: 'https://a.luminsdk.com/v1/lumin.worker.js' },
+  { name: 'Lumin worker (mirror 1)', url: 'https://drkesten.com/v1/lumin.worker.js' },
+  { name: 'Lumin worker (mirror 2)', url: 'https://milpagan.org/v1/lumin.worker.js' },
+  {
+    name: 'Lumin worker (mirror 3)',
+    url: 'https://catholicrebuttals.com/v1/lumin.worker.js',
+  },
+  {
+    name: 'Lumin worker (mirror 4)',
+    url: 'https://instructure-ramen.hpsschools.org/v1/lumin.worker.js',
+  },
+];
+
+export const LUMIN_WORKER_PROXY_URL = `${LUMIN_WORKER_ORIGIN}/lumin/worker`;
 
 // Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
 // Probed by diagnostics only — not part of the games-online ping, since the

@@ -107,8 +107,9 @@ const CDN_TARGETS = [
   { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/favicon.ico' },
   { name: 'Lumin SDK', url: 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js' },
   // + fastly/gcore/testingcf POP mirrors (see src/types/index.ts).
-  // Backend boot hosts live separately in LUMIN_BACKEND_TARGETS and are
-  // probed by diagnostics only, not by the games-online ping.
+  // Backend boot hosts live separately in LUMIN_BACKEND_TARGETS and worker
+  // files in LUMIN_WORKER_FILE_TARGETS; both are probed by diagnostics only,
+  // not by the games-online ping.
 ];
 ```
 
