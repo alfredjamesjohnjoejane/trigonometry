@@ -1,5 +1,5 @@
 import ST from '../storage/index.js';
-import { isSafeHttpUrl } from '../utils/index.js';
+import { isSafeHttpUrl, stripHtmlMetachars } from '../utils/index.js';
 
 export const DEFAULT_PANIC_URL = 'https://www.google.com';
 
@@ -55,10 +55,15 @@ export function handlePanicKey(e: KeyboardEvent): void {
     // but re-check at the navigation sink so scanners and future edits see
     // the allowlist at the point of use.
     if (!isSafeHttpUrl(u)) return;
+    // Strip HTML metacharacters from the DOM-sourced URL before navigation.
+    // No-op for legitimate panic URLs; guarantees the value cannot reinterpret
+    // as markup at the sink (CodeQL js/xss-through-dom barrier).
+    const safe = stripHtmlMetachars(u);
+    if (!isSafeHttpUrl(safe)) return;
     try {
-      window.location.replace(u);
+      window.location.replace(safe);
     } catch (err) {
-      window.location.href = u;
+      window.location.href = safe;
     }
   }
 }

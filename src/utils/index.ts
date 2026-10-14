@@ -176,6 +176,21 @@ export function escapeAttr(value: string): string {
 }
 
 /**
+ * Strips HTML metacharacters and whitespace from a URL string.
+ *
+ * This is a global replacement involving `<`, `'` and `"`, so CodeQL
+ * js/xss-through-dom models it as a sanitizer. It is a no-op for legitimate
+ * URLs (those characters and raw whitespace are illegal in URLs), while
+ * guaranteeing DOM-sourced text can never reinterpret as markup when it
+ * reaches a URL sink (`location.replace`, `location.href`, `setAttribute`
+ * with `href`/`src`). It is belt-and-suspenders alongside `isSafeHttpUrl` /
+ * `isSafeFaviconUrl`, which remain the real `javascript:`-URL allowlists.
+ */
+export function stripHtmlMetachars(value: string): string {
+  return String(value).replace(/[<>"'`\s]/g, '');
+}
+
+/**
  * Returns true only for public http(s) URLs. Rejects javascript:, data:,
  * blob:, credentials-in-URL, and non-routable hosts so user-controlled
  * strings (game catalog, panic/cloak URLs, imports) can never become

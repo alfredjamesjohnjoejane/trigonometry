@@ -6,7 +6,7 @@ import {
   normalizeCloakUrl,
 } from '../types/index.js';
 import ST from '../storage/index.js';
-import { isSafeHttpUrl } from '../utils/index.js';
+import { isSafeHttpUrl, stripHtmlMetachars } from '../utils/index.js';
 
 const DEFAULT_CLOAK = {
   title: 'Google Classroom',
@@ -192,8 +192,12 @@ export function openAboutBlankShell(title: string, icon: string): AboutBlankShel
     // Allowlist at the sink: only http(s)/data-image/relative favicons reach
     // the href attribute; anything else falls back to the bundled icon so a
     // crafted `javascript:` URL can never become script execution.
-    const safeIcon = isSafeFaviconUrl(icon) ? icon : HAMMER_ICON;
-    iconEl.setAttribute('href', safeIcon);
+    // stripHtmlMetachars is a global `<`/`'`/`"` replacement (a no-op for
+    // legitimate favicon URLs), so the DOM-sourced value cannot reinterpret
+    // as markup at the sink (CodeQL js/xss-through-dom barrier).
+    const candidate = isSafeFaviconUrl(icon) ? icon : HAMMER_ICON;
+    const safeIcon = stripHtmlMetachars(candidate);
+    iconEl.setAttribute('href', isSafeFaviconUrl(safeIcon) ? safeIcon : HAMMER_ICON);
     if (!d.querySelector('style[data-cloak-shell]')) {
       const st = d.createElement('style');
       st.setAttribute('data-cloak-shell', '1');

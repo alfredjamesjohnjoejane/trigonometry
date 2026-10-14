@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   escapeAttr,
   isSafeHttpUrl,
+  stripHtmlMetachars,
   buildGameIframeHtml,
   LUMIN_SDK_URLS,
   LUMIN_VENDOR_PATH,
@@ -44,6 +45,37 @@ describe('isSafeHttpUrl', () => {
     expect(isSafeHttpUrl(null)).toBe(false);
     expect(isSafeHttpUrl(undefined)).toBe(false);
     expect(isSafeHttpUrl('not a url')).toBe(false);
+  });
+});
+
+describe('stripHtmlMetachars', () => {
+  it('is a no-op for legitimate URLs', () => {
+    expect(stripHtmlMetachars('https://classroom.google.com/')).toBe(
+      'https://classroom.google.com/'
+    );
+    // Encoded query sequences (%3A) and data-image favicons must survive.
+    expect(
+      stripHtmlMetachars(
+        'https://www.google.com/s2/favicons?sz=64&domain_url=https%3A%2F%2Fexample.com%2F'
+      )
+    ).toBe('https://www.google.com/s2/favicons?sz=64&domain_url=https%3A%2F%2Fexample.com%2F');
+    expect(stripHtmlMetachars('data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=')).toBe(
+      'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4='
+    );
+    expect(stripHtmlMetachars('icon.png')).toBe('icon.png');
+  });
+
+  it('strips HTML metacharacters and whitespace', () => {
+    expect(stripHtmlMetachars('\'"><script>alert(1)</script>')).toBe('scriptalert(1)/script');
+    expect(stripHtmlMetachars('https://example.com/a b')).toBe('https://example.com/ab');
+    expect(stripHtmlMetachars('`x`')).toBe('x');
+  });
+
+  it('does not allowlist by itself (javascript: survives stripping)', () => {
+    // The scheme allowlist (isSafeHttpUrl/isSafeFaviconUrl) does the real
+    // blocking; stripping only guarantees no markup reinterpretation.
+    expect(stripHtmlMetachars('javascript:alert(1)')).toBe('javascript:alert(1)');
+    expect(isSafeHttpUrl(stripHtmlMetachars('javascript:alert(1)'))).toBe(false);
   });
 });
 
