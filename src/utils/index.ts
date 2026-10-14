@@ -252,19 +252,33 @@ export const LUMIN_SDK_URLS: readonly string[] = [
   'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
 ];
+// Worker proxy mirror (no `luminsdk` substring; see worker/src/index.js
+// /lumin/script). Kept separate from LUMIN_SDK_URLS so the "verified gh-path
+// POPs" test stays exact; it is spliced into the race order below.
+export const LUMIN_WORKER_SCRIPT_URL =
+  'https://url-marketplace.jesherhead.workers.dev/lumin/script';
 // Same-origin vendored copy (public/vendor/lumin.min.js). Tried FIRST because
 // same-origin probes show the site itself always loads on school WiFi — this
 // bypasses CDN path/keyword filters entirely. Re-sync procedure lives in
 // public/vendor/lumin.version.json.
 export const LUMIN_VENDOR_PATH = 'vendor/lumin.min.js';
+// sha256 of the vendored file (mirrors public/vendor/lumin.version.json).
+// Used by the build self-check and available for runtime byte verification.
+export const LUMIN_VENDOR_SHA256 =
+  'cc6ccb7ca50b5ea305ba0188ffaad3ddc8090d6203af9a520e510a167e0f5855';
+// Staggered-race delays between mirror starts so the fastest healthy source
+// wins without flooding throttled school WiFi with 6 parallel fetches.
+export const LUMIN_RACE_STAGGER_MS = 1200;
+export const LUMIN_SCRIPT_TAG_TIMEOUT_MS = 8000;
+export const LUMIN_FETCH_BLOB_TIMEOUT_MS = 8000;
 
-/** Ordered script sources: same-origin vendor copy first, then CDN POPs. */
+/** Ordered script sources: vendor -> worker proxy -> CDN POPs. */
 export function luminScriptUrls(): string[] {
   try {
     const first = new URL(LUMIN_VENDOR_PATH, document.baseURI).href;
-    return [first, ...LUMIN_SDK_URLS];
+    return [first, LUMIN_WORKER_SCRIPT_URL, ...LUMIN_SDK_URLS];
   } catch {
-    return [LUMIN_VENDOR_PATH, ...LUMIN_SDK_URLS];
+    return [LUMIN_VENDOR_PATH, LUMIN_WORKER_SCRIPT_URL, ...LUMIN_SDK_URLS];
   }
 }
 // Backend boot hosts decoded from the stub 2026-10-14 live in
@@ -277,7 +291,7 @@ export const LUMIN_SDK_SRI = '';
 
 export interface LuminMirrorAttempt {
   url: string;
-  tier: 'tag' | 'fetch-blob';
+  tier: 'tag' | 'fetch-blob' | 'idb';
   ok: boolean;
   ms: number | null;
   errorName: string | null;
@@ -304,7 +318,11 @@ export function getTestPageHtml(): string {
   // JSON.stringify does not escape `<`, so a `</script>` sequence inside a URL
   // would break out of the inline script. URLs are constants today, but escape
   // `<` defensively so this template can never become a script-breakout sink.
-  const urls = JSON.stringify([LUMIN_VENDOR_PATH, ...LUMIN_SDK_URLS]).replace(/</g, '\\x3c');
+  const urls = JSON.stringify([
+    LUMIN_VENDOR_PATH,
+    LUMIN_WORKER_SCRIPT_URL,
+    ...LUMIN_SDK_URLS,
+  ]).replace(/</g, '\\x3c');
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>html,body{margin:0;width:100%;min-height:100%;overflow:auto;background:#111}body{font-family:Segoe UI,system-ui,sans-serif}#games{width:100%;min-height:100vh;background:#111}#lumin-mirror-log{color:#888;font-size:12px;padding:12px;white-space:pre-wrap;word-break:break-all}</style></head><body><div id="games"></div><div id="lumin-mirror-log"></div><script>(function(){var urls=${urls};var logEl=document.getElementById("lumin-mirror-log");function log(m){try{console.log("[LuminMirror] "+m);if(logEl)logEl.textContent+=m+"\\n";}catch(e){}}function load(i){if(i>=urls.length){log("all "+urls.length+" mirrors failed");return;}log("trying mirror "+(i+1)+"/"+urls.length+": "+urls[i]);var s=document.createElement("script");s.src=urls[i];s.onload=function(){log("loaded mirror "+(i+1)+", calling Lumin.init");try{var r=Lumin.init({container:document.getElementById("games"),theme:"dark"});if(r&&r.catch)r.catch(function(e){log("init rejected on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);});}catch(e){log("init threw on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);}};s.onerror=function(){log("script error on mirror "+(i+1)+": "+urls[i]);load(i+1);};document.head.appendChild(s);}load(0);})();</script></body></html>`;
 }
 

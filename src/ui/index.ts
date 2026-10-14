@@ -27,9 +27,14 @@ import {
   LUMIN_SDK_URL,
   luminScriptUrls,
   LUMIN_SDK_SRI,
+  LUMIN_RACE_STAGGER_MS,
+  LUMIN_SCRIPT_TAG_TIMEOUT_MS,
+  LUMIN_FETCH_BLOB_TIMEOUT_MS,
   formatMirrorAttempts,
   type LuminMirrorAttempt,
 } from '../utils/index.js';
+import { getLuminScript, saveLuminScript } from '../lumin-store/index.js';
+import { getCacheSize } from '../cache/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
 import ST from '../storage/index.js';
 import {
@@ -839,7 +844,32 @@ function initHomepageTest(): void {
       });
     });
     row.append(retry, diag, copy);
-    div.append(head, detail, hint, row);
+    const degraded = document.createElement('div');
+    degraded.style.cssText =
+      'font-size:.78rem;color:#888;margin-top:12px;line-height:1.6;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px';
+    degraded.textContent =
+      'Still blocked? Your cached games and catalog remain usable without Lumin. ';
+    const cachedBtn = mkBtn('Show cached games', false);
+    cachedBtn.addEventListener('click', () => {
+      try {
+        (window as unknown as { renderGames?: () => void }).renderGames?.();
+      } catch {
+        /* ignore */
+      }
+      try {
+        document.getElementById('games')?.scrollIntoView({ behavior: 'smooth' });
+      } catch {
+        /* ignore */
+      }
+      void getCacheSize()
+        .then(n => {
+          degraded.textContent = `Cached games available offline: ${n}. Browse the grid below — live homepage features need Lumin, but cached entries play. `;
+          degraded.appendChild(cachedBtn);
+        })
+        .catch(() => {});
+    });
+    degraded.appendChild(cachedBtn);
+    div.append(head, detail, hint, row, degraded);
     if (mirrorAttempts.length > 1) {
       const debug = document.createElement('details');
       debug.style.cssText =
@@ -899,9 +929,11 @@ function initHomepageTest(): void {
     start();
     return;
   }
-  // Ordered fallback: same-origin vendor copy first (bypasses CDN
-  // path/keyword filters entirely), then verified jsDelivr POPs. The POPs beat
-  // a cdn.jsdelivr.net-only DNS block, not a `luminsdk` keyword filter.
+  // Staggered race: vendor (same-origin, beats keyword filters) -> worker
+  // proxy (no `luminsdk` substring) -> jsDelivr POPs. Each mirror starts
+  // STAGGER ms after the previous so the fastest healthy source wins without
+  // flooding throttled school WiFi. First mirror to expose Lumin.init wins;
+  // losers are removed. Per-mirror tag -> fetch-blob tiers preserved.
   const mirrorUrls = luminScriptUrls();
   const mirrorAttempts: LuminMirrorAttempt[] = [];
   try {
@@ -910,8 +942,8 @@ function initHomepageTest(): void {
   } catch {
     /* ignore */
   }
-  const SCRIPT_TIMEOUT_MS = 12000;
-  const FETCH_BLOB_TIMEOUT_MS = 8000;
+  const SCRIPT_TIMEOUT_MS = LUMIN_SCRIPT_TAG_TIMEOUT_MS;
+  const FETCH_BLOB_TIMEOUT_MS = LUMIN_FETCH_BLOB_TIMEOUT_MS;
   const nowMs = (): number => {
     try {
       return performance.now();
@@ -969,16 +1001,117 @@ function initHomepageTest(): void {
       mirrorAttempts
     );
   };
-  const tryMirror = (index: number): void => {
-    if (index >= mirrorUrls.length) {
-      failAllMirrors();
+  const raceState = { won: false, finished: 0, timers: [] as ReturnType<typeof setTimeout>[] };
+  const hasLumin = (): boolean => {
+    try {
+      const ww = window as unknown as { Lumin?: { init?: unknown } };
+      return !!ww.Lumin && typeof ww.Lumin.init === 'function';
+    } catch {
+      return false;
+    }
+  };
+  const cleanupLosers = (winnerTagId: string): void => {
+    for (const t of raceState.timers) clearTimeout(t);
+    try {
+      document.querySelectorAll('script[id^="lumin-script-r"], script#lumin-script').forEach(el => {
+        if ((el as HTMLElement).id !== winnerTagId) el.remove();
+      });
+    } catch {
+      /* ignore */
+    }
+  };
+  const winRace = (tagId: string): void => {
+    if (raceState.won) return;
+    raceState.won = true;
+    cleanupLosers(tagId);
+    start();
+  };
+  const loseMirror = (): void => {
+    raceState.finished += 1;
+    if (!raceState.won && raceState.finished >= mirrorUrls.length + 1) failAllMirrors();
+  };
+  const executeCodeViaBlob = (
+    url: string,
+    tier: LuminMirrorAttempt['tier'],
+    code: string,
+    ms: number | null,
+    tagId: string
+  ): void => {
+    if (raceState.won) return;
+    let href = '';
+    try {
+      href = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
+    } catch (e) {
+      recordAttempt(url, tier, false, ms, e);
+      loseMirror();
       return;
     }
+    const bs = document.createElement('script');
+    bs.id = tagId;
+    bs.src = href;
+    const done = (): void => {
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(href);
+        } catch {
+          /* ignore */
+        }
+      }, 5000);
+    };
+    bs.onload = () => {
+      done();
+      if (raceState.won) return;
+      if (hasLumin()) {
+        recordAttempt(url, tier, true, ms);
+        winRace(tagId);
+      } else {
+        recordAttempt(
+          url,
+          tier,
+          false,
+          ms,
+          new TypeError(`blob script loaded but Lumin global missing (src=${url})`)
+        );
+        loseMirror();
+      }
+    };
+    bs.onerror = () => {
+      done();
+      if (raceState.won) return;
+      recordAttempt(
+        url,
+        tier,
+        false,
+        ms,
+        new TypeError(`blob script tag failed to load (src=${url})`)
+      );
+      loseMirror();
+    };
+    document.body.appendChild(bs);
+  };
+  // Tier 0 for the whole race: last-good bytes from IndexedDB (zero network).
+  const tryIdbTier = (): void => {
+    const f0 = nowMs();
+    void getLuminScript()
+      .then(stored => {
+        if (raceState.won || !stored) {
+          loseMirror();
+          return;
+        }
+        const ms = Math.round(nowMs() - f0);
+        executeCodeViaBlob(`${stored.url}#idb`, 'idb', stored.code, ms, 'lumin-script-r-idb');
+      })
+      .catch(e => {
+        if (!raceState.won) recordAttempt('idb-store', 'idb', false, null, e);
+        loseMirror();
+      });
+  };
+  const tryMirrorRace = (index: number): void => {
+    if (raceState.won) return;
     const url = mirrorUrls[index] ?? LUMIN_SDK_URL;
-    // Drop the previously failed tag so #lumin-script always reflects the
-    // in-flight mirror and env snapshots stay accurate.
+    const tagId = index === 0 ? 'lumin-script' : `lumin-script-r${index}`;
     try {
-      document.getElementById('lumin-script')?.remove();
+      document.getElementById(tagId)?.remove();
     } catch {
       /* ignore */
     }
@@ -988,7 +1121,9 @@ function initHomepageTest(): void {
     // Final tier per mirror: fetch the bytes and execute via blob URL. Same
     // hosts, so no filter bypass — but it occasionally beats extensions that
     // strip <script> tags while allowing fetch (CSP already allows both).
+    // Successful bytes are saved to the IDB last-good store for next time.
     const tryFetchBlob = (): void => {
+      if (raceState.won) return;
       const f0 = nowMs();
       let done = false;
       const finish = (ok: boolean, err?: unknown): void => {
@@ -998,7 +1133,7 @@ function initHomepageTest(): void {
         const ms = Math.round(nowMs() - f0);
         if (!ok) {
           recordAttempt(url, 'fetch-blob', false, ms, err);
-          tryMirror(index + 1);
+          loseMirror();
         }
       };
       const blobTimer = setTimeout(() => {
@@ -1010,56 +1145,23 @@ function initHomepageTest(): void {
         }
       }, FETCH_BLOB_TIMEOUT_MS);
       const blobCtrl = new AbortController();
-      const cleanupObjectUrl = (href: string): void => {
-        setTimeout(() => {
-          try {
-            URL.revokeObjectURL(href);
-          } catch {
-            /* ignore */
-          }
-        }, 5000);
-      };
       try {
         void fetch(url, { signal: blobCtrl.signal, cache: 'no-store' }).then(
           res => {
+            if (raceState.won || done) return;
             if (!res.ok) {
               finish(false, new TypeError(`fetch-blob HTTP ${res.status} (src=${url})`));
               return;
             }
             void res
-              .blob()
-              .then(body => {
-                if (done) return;
-                const href = URL.createObjectURL(body);
-                const bs = document.createElement('script');
-                bs.id = 'lumin-script';
-                bs.src = href;
-                bs.onload = () => {
-                  if (done) return;
-                  done = true;
-                  if (blobTimer) clearTimeout(blobTimer);
-                  const ms = Math.round(nowMs() - f0);
-                  cleanupObjectUrl(href);
-                  const ww = window as unknown as { Lumin?: { init?: unknown } };
-                  if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-                    recordAttempt(url, 'fetch-blob', true, ms);
-                    start();
-                  } else {
-                    recordAttempt(
-                      url,
-                      'fetch-blob',
-                      false,
-                      ms,
-                      new TypeError(`blob script loaded but Lumin global missing (src=${url})`)
-                    );
-                    tryMirror(index + 1);
-                  }
-                };
-                bs.onerror = () => {
-                  cleanupObjectUrl(href);
-                  finish(false, new TypeError(`blob script tag failed to load (src=${url})`));
-                };
-                document.body.appendChild(bs);
+              .text()
+              .then(code => {
+                if (done || raceState.won) return;
+                done = true;
+                if (blobTimer) clearTimeout(blobTimer);
+                const ms = Math.round(nowMs() - f0);
+                void saveLuminScript(url, code).catch(() => {});
+                executeCodeViaBlob(url, 'fetch-blob', code, ms, `${tagId}-blob`);
               })
               .catch(e => finish(false, e));
           },
@@ -1070,7 +1172,7 @@ function initHomepageTest(): void {
       }
     };
     const s = document.createElement('script');
-    s.id = 'lumin-script';
+    s.id = tagId;
     s.src = url;
     // Always CORS: all mirrors send ACAO:* + JS MIME (verified 2026-10-14),
     // so responses are `cors` (status visible, SW-cacheable) instead of
@@ -1080,7 +1182,7 @@ function initHomepageTest(): void {
       s.integrity = LUMIN_SDK_SRI;
     }
     timer = setTimeout(() => {
-      if (settled) return;
+      if (settled || raceState.won) return;
       settled = true;
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
@@ -1098,14 +1200,13 @@ function initHomepageTest(): void {
       tryFetchBlob();
     }, SCRIPT_TIMEOUT_MS);
     s.onload = () => {
-      if (settled) return;
+      if (settled || raceState.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
       const ms = Math.round(nowMs() - t0);
-      const ww = window as unknown as { Lumin?: { init?: unknown } };
-      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+      if (hasLumin()) {
         recordAttempt(url, 'tag', true, ms);
-        start();
+        winRace(tagId);
       } else {
         // Loaded but did not execute: CSP/adblock/filter stripped it.
         // Try the fetch-blob tier before giving up on this mirror.
@@ -1120,7 +1221,7 @@ function initHomepageTest(): void {
       }
     };
     s.onerror = () => {
-      if (settled) return;
+      if (settled || raceState.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
       const ms = Math.round(nowMs() - t0);
@@ -1135,58 +1236,22 @@ function initHomepageTest(): void {
     };
     document.body.appendChild(s);
   };
-  const existing = document.getElementById('lumin-script');
-  if (existing) {
-    const existingSrc =
-      (existing as HTMLScriptElement).src || existing.getAttribute('src') || LUMIN_SDK_URL;
-    const existingIdx = mirrorUrls.indexOf(existingSrc);
-    // If the tag already finished loading and exposed Lumin, use it.
+  if (hasLumin()) {
     try {
-      const ww = window as unknown as { Lumin?: { init?: unknown } };
-      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-        start();
-        return;
-      }
+      console.log('[HomepageTest] Lumin global already present, calling init directly');
     } catch {
-      /* fall through to listeners */
+      /* ignore */
     }
-    existing.addEventListener(
-      'load',
-      () => {
-        const ww = window as unknown as { Lumin?: { init?: unknown } };
-        if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-          recordAttempt(existingSrc, 'tag', true, null);
-          start();
-        } else {
-          recordAttempt(
-            existingSrc,
-            'tag',
-            false,
-            null,
-            new TypeError(`script loaded but Lumin global missing after load (src=${existingSrc})`)
-          );
-          tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
-        }
-      },
-      { once: true }
-    );
-    existing.addEventListener(
-      'error',
-      () => {
-        recordAttempt(
-          existingSrc,
-          'tag',
-          false,
-          null,
-          new TypeError(`lumin.min.js script tag failed to load (src=${existingSrc})`)
-        );
-        tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
-      },
-      { once: true }
-    );
+    start();
     return;
   }
-  tryMirror(0);
+  // Staggered start: IDB tier + vendor fire immediately, worker proxy ~1.2s,
+  // POPs after. Early winner cancels the rest via winRace cleanup.
+  tryIdbTier();
+  mirrorUrls.forEach((_u, i) => {
+    const t = setTimeout(() => tryMirrorRace(i), i * LUMIN_RACE_STAGGER_MS);
+    raceState.timers.push(t);
+  });
 }
 
 /** Shape of the event captured from `beforeinstallprompt`. */

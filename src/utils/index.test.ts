@@ -129,18 +129,21 @@ describe('lumin mirrors', () => {
   it('puts the same-origin vendor copy first', () => {
     expect(LUMIN_VENDOR_PATH).toBe('vendor/lumin.min.js');
     const urls = luminScriptUrls();
-    expect(urls.length).toBe(LUMIN_SDK_URLS.length + 1);
+    expect(urls.length).toBe(LUMIN_SDK_URLS.length + 2);
     expect(urls[0]).toContain('vendor/lumin.min.js');
+    expect(urls[1]).toContain('/lumin/script');
   });
 
   it('lists the decoded backend boot hosts', () => {
-    expect(LUMIN_BACKEND_TARGETS.length).toBe(5);
-    expect(LUMIN_BACKEND_TARGETS[0]?.url).toContain('a.luminsdk.com');
+    expect(LUMIN_BACKEND_TARGETS.length).toBe(6);
+    expect(LUMIN_BACKEND_TARGETS[0]?.url).toContain('/lumin/boot');
+    expect(LUMIN_BACKEND_TARGETS[1]?.url).toContain('a.luminsdk.com');
   });
 
   it('test page tries mirrors in order', () => {
     const html = getTestPageHtml();
     expect(html).toContain('fastly.jsdelivr.net/gh/luminsdk/script');
+    expect(html).toContain('/lumin/script');
     expect(html).toContain('Lumin.init');
   });
 });

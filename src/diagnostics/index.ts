@@ -210,7 +210,9 @@ export function getEnvironmentSnapshot(): EnvSnapshot {
     /* ignore */
   }
   try {
-    const s = document.getElementById('lumin-script') as HTMLScriptElement | null;
+    const s =
+      (document.getElementById('lumin-script') as HTMLScriptElement | null) ??
+      (document.querySelector('script[id^="lumin-script"]') as HTMLScriptElement | null);
     scriptPresent = !!s;
     scriptSrc = s?.src ?? s?.getAttribute('src') ?? null;
   } catch {
@@ -546,7 +548,11 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
   const initType = typeof w.Lumin?.init;
   const scriptSrc = (() => {
     try {
-      return (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ?? null;
+      return (
+        (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ??
+        (document.querySelector('script[id^="lumin-script"]') as HTMLScriptElement | null)?.src ??
+        null
+      );
     } catch {
       return null;
     }
@@ -647,14 +653,14 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
     return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
   if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
-    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — CDN fallback cannot help. The same-origin vendor copy (vendor/lumin.min.js) should cover this; if it does not, the vendor file itself is stale or missing.';
+    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — CDN fallback cannot help. The same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store should cover this; if none did, the vendor file is stale and the IDB store is empty.';
   if (
     sameOriginOk &&
     backendProbes.length > 0 &&
     !backendAnyOk &&
     (lumin.present || luminOk.length > 0)
   )
-    return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail (a.luminsdk.com + mirrors). Lumin.init can never succeed while these are filtered — allowlist a.luminsdk.com/api/v1/boot or use another network.';
+    return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail (worker proxy + a.luminsdk.com + mirrors). The worker proxy (/lumin/boot) should have covered a direct-host block — if it also fails, the proxy host itself is filtered. Allowlist the worker origin or a.luminsdk.com/api/v1/boot, or use another network.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
   if (lumin.present && lumin.attempted && !lumin.ok)
@@ -677,19 +683,19 @@ export function buildChecklist(report: DiagReport): string[] {
   const backendOk = backendProbes.filter(p => p.ok).length;
   return [
     `1. Browser online flag: ${report.env.onLine ? 'ONLINE' : 'OFFLINE'} — if OFFLINE, rejoin WiFi / accept the captive portal.`,
-    `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
-    '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; the same-origin vendor copy (vendor/lumin.min.js) is the fix — check it loaded in the mirror rows.',
-    `4. Script loads but backend rows all fail => Lumin boot hosts are filtered (backends passing now: ${backendOk}/${backendProbes.length}). Allowlist a.luminsdk.com/api/v1/boot.`,
+    `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net + the worker proxy. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
+    '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; the same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store are the fix — check they appear in the mirror rows.',
+    `4. Script loads but backend rows all fail => Lumin boot hosts are filtered (backends passing now: ${backendOk}/${backendProbes.length}). The worker proxy row (/lumin/boot) should pass first; if it fails too, allowlist the worker origin or a.luminsdk.com/api/v1/boot.`,
     '5. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
     '6. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
-    '7. Loader tries mirrors in order (vendor → cdn → fastly → gcore → testingcf); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror breakdown.',
+    '7. Loader runs a staggered race (IDB last-good + vendor immediately, worker proxy ~1.2s, then POPs every 1.2s); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror [tag|fetch-blob|idb] breakdown.',
     '8. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
   ];
 }
 
 export function getMirrorAttemptsFromWindow(): Array<{
   url: string;
-  tier?: 'tag' | 'fetch-blob';
+  tier?: 'tag' | 'fetch-blob' | 'idb';
   ok: boolean;
   ms: number | null;
   errorName: string | null;

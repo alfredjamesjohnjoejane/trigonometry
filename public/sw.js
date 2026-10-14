@@ -12,6 +12,7 @@ const LUMIN_SCRIPT_URLS = [
   'https://fastly.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://url-marketplace.jesherhead.workers.dev/lumin/script',
 ];
 // Asset paths are derived from the worker's own scope (registration scope
 // ends with the base: '/' in dev, '/<repo>/' in production) instead of a
@@ -71,6 +72,34 @@ self.addEventListener('install', (event) => {
         );
       })
       .then(() => caches.open(IMAGE_CACHE_NAME))
+      .then(() => {
+        // Best-effort warm of the version-independent Lumin cache: a student
+        // who installs on filtered WiFi still gets the vendor copy via the
+        // precache above; warming one CDN/worker copy here means the next
+        // visit can serve stale-while-revalidate instantly. Never fails install.
+        try {
+          return caches.open(LUMIN_CACHE_NAME).then((luminCache) =>
+            Promise.allSettled(
+              LUMIN_SCRIPT_URLS.slice(0, 2).map((u) =>
+                fetch(u)
+                  .then((res) => {
+                    if (!res.ok) return;
+                    const toCache = new Response(res.clone().body, {
+                      status: res.status,
+                      statusText: res.statusText,
+                      headers: new Headers(res.headers),
+                    });
+                    toCache.headers.set('sw-cache-date', Date.now().toString());
+                    return luminCache.put(u, toCache).catch(() => {});
+                  })
+                  .catch(() => {})
+              )
+            )
+          );
+        } catch (err) {
+          return undefined;
+        }
+      })
     // NOTE: no skipWaiting() here on purpose. The page's update toast
     // (index.html) relies on the new worker sitting in `waiting` until the
     // user clicks Update, which posts SKIP_WAITING. Auto-skipping raced the

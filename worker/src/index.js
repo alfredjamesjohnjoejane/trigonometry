@@ -81,6 +81,21 @@ const ALLOWED_ORIGIN = 'https://jesherhead.github.io';
 // US Cloud -> https://us.i.posthog.com, EU Cloud -> https://eu.i.posthog.com.
 const POSTHOG_UPSTREAM = 'https://us.i.posthog.com';
 
+// Lumin SDK script + boot proxy. School filters often block the `luminsdk`
+// keyword or a.luminsdk.com outright; proxying through this worker host (no
+// `luminsdk` substring, allowlisted as the marketplace API origin) gives the
+// page an extra mirror that survives keyword/path filters. The client tries
+// vendor -> worker proxy -> jsDelivr POPs in a staggered race.
+const LUMIN_SCRIPT_UPSTREAM =
+  'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
+const LUMIN_BOOT_UPSTREAMS = [
+  'https://a.luminsdk.com/api/v1/boot',
+  'https://drkesten.com/api/v1/boot',
+  'https://milpagan.org/api/v1/boot',
+  'https://catholicrebuttals.com/api/v1/boot',
+  'https://instructure-ramen.hpsschools.org/api/v1/boot',
+];
+
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
@@ -659,6 +674,92 @@ async function proxyPosthog(request, url) {
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
+// GET /lumin/script -> LUMIN_SCRIPT_UPSTREAM (cached 1h at edge + browser).
+// No luminsdk substring in the path prefix the filter sees beyond the query.
+async function proxyLuminScript() {
+  let res;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      res = await fetch(LUMIN_SCRIPT_UPSTREAM, {
+        signal: ctrl.signal,
+        redirect: 'follow',
+        headers: { 'User-Agent': 'jesherhead-lumin-proxy' },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    return json({ error: 'Lumin upstream unreachable.' }, 502);
+  }
+  if (!res.ok) {
+    return json({ error: 'Lumin upstream returned ' + res.status + '.' }, 502);
+  }
+  const body = await res.arrayBuffer().catch(() => null);
+  if (!body || body.byteLength < 50000) {
+    return json({ error: 'Lumin upstream returned suspiciously small body.' }, 502);
+  }
+  const headers = new Headers();
+  headers.set('Content-Type', 'application/javascript; charset=utf-8');
+  headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+  headers.set('X-Lumin-Upstream', LUMIN_SCRIPT_UPSTREAM);
+  const cors = corsHeaders();
+  for (const [k, v] of Object.entries(cors)) headers.set(k, v);
+  return new Response(body, { status: 200, headers });
+}
+
+// ANY /lumin/boot[?t=...] -> first healthy LUMIN_BOOT_UPSTREAMS host.
+// The stub appends ?t= at runtime; pass method/query/body through untouched
+// and rotate upstreams so one filtered host does not fail the request.
+async function proxyLuminBoot(request, url) {
+  const query = url.search || '';
+  const method = request.method.toUpperCase();
+  const body =
+    method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer().catch(() => undefined);
+  let lastStatus = 502;
+  for (const upstream of LUMIN_BOOT_UPSTREAMS) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 6000);
+      let res;
+      try {
+        const fwdHeaders = new Headers(request.headers);
+        fwdHeaders.delete('host');
+        fwdHeaders.delete('content-length');
+        res = await fetch(upstream + query, {
+          method,
+          headers: fwdHeaders,
+          body,
+          redirect: 'manual',
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+      // Any HTTP response (even 404 without ?t=) proves the host is alive;
+      // only try the next upstream on network abort or 5xx.
+      if (res.ok || (res.status >= 200 && res.status < 500 && res.status !== 403 && res.status !== 451)) {
+        const outHeaders = new Headers(res.headers);
+        outHeaders.set('X-Lumin-Upstream', upstream);
+        outHeaders.set('Cache-Control', 'no-store');
+        const cors = corsHeaders();
+        for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
+        return new Response(res.body, { status: res.status, headers: outHeaders });
+      }
+      lastStatus = res.status;
+      if (res.status === 403 || res.status === 451) continue;
+      const outHeaders = new Headers(res.headers);
+      const cors = corsHeaders();
+      for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
+      return new Response(res.body, { status: res.status, headers: outHeaders });
+    } catch (err) {
+      continue;
+    }
+  }
+  return json({ error: 'All Lumin boot upstreams unreachable.', upstreams: LUMIN_BOOT_UPSTREAMS.length }, lastStatus === 502 ? 502 : lastStatus);
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') {
@@ -672,6 +773,19 @@ export default {
     // (OPTIONS already returned above via the global CORS preflight.)
     if (url.pathname === '/ph' || url.pathname.startsWith('/ph/')) {
       return proxyPosthog(request, url);
+    }
+
+    // /lumin/* — Lumin SDK + boot proxy (see proxyLuminScript/proxyLuminBoot).
+    // Handled before the GITHUB_TOKEN check so game loading never depends on
+    // marketplace config.
+    if (url.pathname === '/lumin/script' || url.pathname.startsWith('/lumin/script/')) {
+      if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS') {
+        return json({ error: 'Method not allowed.' }, 405);
+      }
+      return proxyLuminScript();
+    }
+    if (url.pathname === '/lumin/boot' || url.pathname.startsWith('/lumin/boot/')) {
+      return proxyLuminBoot(request, url);
     }
 
     const token = env.GITHUB_TOKEN;

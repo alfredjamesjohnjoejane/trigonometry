@@ -120,12 +120,27 @@ export const CDN_TARGETS: CDNTarget[] = [
     name: 'Lumin SDK (testingcf)',
     url: 'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   },
+  {
+    name: 'Lumin SDK (worker proxy)',
+    url: 'https://url-marketplace.jesherhead.workers.dev/lumin/script',
+  },
 ];
+
+// Worker proxy origin (Cloudflare). No `luminsdk` substring, so it survives
+// keyword/path filters that kill every jsDelivr POP. Served with CORS + 1h
+// edge cache by worker/src/index.js /lumin/*.
+export const LUMIN_WORKER_ORIGIN = 'https://url-marketplace.jesherhead.workers.dev';
+export const LUMIN_WORKER_SCRIPT_URL = `${LUMIN_WORKER_ORIGIN}/lumin/script`;
+export const LUMIN_WORKER_BOOT_URL = `${LUMIN_WORKER_ORIGIN}/lumin/boot`;
 
 // Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
 // Probed by diagnostics only — not part of the games-online ping, since the
 // catalog can be browsable while Lumin init is blocked.
 export const LUMIN_BACKEND_TARGETS: CDNTarget[] = [
+  {
+    name: 'Lumin backend (worker proxy)',
+    url: 'https://url-marketplace.jesherhead.workers.dev/lumin/boot',
+  },
   { name: 'Lumin backend (primary)', url: 'https://a.luminsdk.com/api/v1/boot' },
   { name: 'Lumin backend (mirror 1)', url: 'https://drkesten.com/api/v1/boot' },
   { name: 'Lumin backend (mirror 2)', url: 'https://milpagan.org/api/v1/boot' },
