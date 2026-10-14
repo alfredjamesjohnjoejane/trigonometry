@@ -26,7 +26,10 @@ import {
   showErrorToast,
   escapeHtml,
   LUMIN_SDK_URL,
+  LUMIN_SDK_URLS,
   LUMIN_SDK_SRI,
+  formatMirrorAttempts,
+  type LuminMirrorAttempt,
 } from '../utils/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
 import ST from '../storage/index.js';
@@ -664,10 +667,12 @@ function initHomepageTest(): void {
   mount.dataset.ready = '1';
   installLogCapture();
   installDiagGlobals();
-  const fail = (rawErr?: unknown) => {
+  const fail = (rawErr?: unknown, mirrorAttempts: LuminMirrorAttempt[] = []) => {
     mount.dataset.ready = '0';
     mount.textContent = '';
     const errText = rawErr === undefined ? '' : describeError(rawErr);
+    const mirrorText = mirrorAttempts.length ? `\nMirror attempts:\n${formatMirrorAttempts(mirrorAttempts)}` : '';
+    const combinedErrText = errText + mirrorText;
     const errName =
       rawErr instanceof Error ? rawErr.name : rawErr === undefined ? '' : typeof rawErr;
     let classification = 'unknown';
@@ -693,11 +698,16 @@ function initHomepageTest(): void {
           initType: env.luminGlobal,
           ok: false,
           errorName: errName || null,
-          errorMessage: errText.slice(0, 500) || null,
+          errorMessage: combinedErrText.slice(0, 800) || null,
           ms: null,
         },
-        recentLogs: [],
-        likelyCause: `Homepage mount failed [${classification}]. Press "Diagnose connection" on school WiFi for the full probe battery.`,
+        recentLogs: mirrorAttempts.length
+          ? mirrorAttempts.map(
+              a =>
+                `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
+            )
+          : [],
+        likelyCause: `Homepage mount failed [${classification}] after ${mirrorAttempts.length || 1} mirror(s). Press "Diagnose connection" on school WiFi for the full probe battery.`,
         checklist: [
           'Press "🔍 Diagnose connection" below while still on the school network.',
           'Press "📋 Copy report" in the panel and save it — the failure code ties the two together.',
@@ -713,6 +723,13 @@ function initHomepageTest(): void {
         classification,
         failureCode,
         online: navigator.onLine,
+        mirrorsTried: mirrorAttempts.length,
+        mirrorSummary: mirrorAttempts.map(a => ({
+          url: a.url,
+          ok: a.ok,
+          ms: a.ms,
+          err: a.errorName ? `${a.errorName}: ${(a.errorMessage ?? '').slice(0, 120)}` : null,
+        })),
       });
     } catch {
       /* ignore */
@@ -770,6 +787,24 @@ function initHomepageTest(): void {
         `error: ${errText || '(none captured)'}\n` +
         `classification: ${classification}\n` +
         `browser online: ${onlineTxt}\n` +
+        `mirrors tried: ${mirrorAttempts.length || 1}\n` +
+        (mirrorAttempts.length ? `${formatMirrorAttempts(mirrorAttempts)}\n` : '') +
+        `script src: ${(() => {
+          try {
+            return (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ?? 'none';
+          } catch {
+            return 'unreadable';
+          }
+        })()}\n` +
+        `lumin global: ${(() => {
+          try {
+            const w = window as unknown as { Lumin?: { init?: unknown } };
+            if (w.Lumin == null) return 'missing';
+            return typeof w.Lumin.init;
+          } catch {
+            return 'unreadable';
+          }
+        })()}\n` +
         `time: ${new Date().toISOString()}\n` +
         `page: ${location.href}\n` +
         `Tip: press Diagnose connection for the full network report.`;
@@ -780,6 +815,20 @@ function initHomepageTest(): void {
     });
     row.append(retry, diag, copy);
     div.append(head, detail, hint, row);
+    if (mirrorAttempts.length > 1) {
+      const debug = document.createElement('details');
+      debug.style.cssText =
+        'margin-top:12px;text-align:left;font-size:.72rem;color:#888;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px';
+      const summary = document.createElement('summary');
+      summary.style.cssText = 'cursor:pointer;color:#aaa;font-weight:700';
+      const okCount = mirrorAttempts.filter(a => a.ok).length;
+      summary.textContent = `Debug: ${okCount}/${mirrorAttempts.length} mirrors loaded (click to expand)`;
+      const pre = document.createElement('pre');
+      pre.style.cssText = 'margin:8px 0 0;white-space:pre-wrap;word-break:break-word;color:#888';
+      pre.textContent = formatMirrorAttempts(mirrorAttempts);
+      debug.append(summary, pre);
+      div.appendChild(debug);
+    }
     mount.appendChild(div);
   };
   const start = () => {
@@ -817,35 +866,196 @@ function initHomepageTest(): void {
   };
   const w = window as unknown as { Lumin?: { init: (o: unknown) => void } };
   if (w.Lumin && typeof w.Lumin.init === 'function') {
+    try {
+      console.log('[HomepageTest] Lumin global already present, calling init directly');
+    } catch {
+      /* ignore */
+    }
     start();
     return;
   }
+  // Ordered fallback across verified jsDelivr POPs (byte-identical 2026-10-14).
+  // Beats a cdn.jsdelivr.net-only DNS block, not a `luminsdk` keyword filter.
+  const mirrorAttempts: LuminMirrorAttempt[] = [];
+  try {
+    (window as unknown as Record<string, unknown>).__luminMirrorAttempts = mirrorAttempts;
+    (window as unknown as Record<string, unknown>).__luminMirrorUrls = [...LUMIN_SDK_URLS];
+  } catch {
+    /* ignore */
+  }
+  const SCRIPT_TIMEOUT_MS = 12000;
+  const nowMs = (): number => {
+    try {
+      return performance.now();
+    } catch {
+      return Date.now();
+    }
+  };
+  const recordAttempt = (
+    url: string,
+    ok: boolean,
+    ms: number | null,
+    err?: unknown
+  ): void => {
+    const entry: LuminMirrorAttempt = {
+      url,
+      ok,
+      ms,
+      errorName: err instanceof Error ? err.name : err === undefined ? null : typeof err,
+      errorMessage: err === undefined ? null : describeError(err).slice(0, 300),
+    };
+    mirrorAttempts.push(entry);
+    try {
+      console.log(
+        `[HomepageTest] mirror ${mirrorAttempts.length}/${LUMIN_SDK_URLS.length} ${ok ? 'LOADED' : 'FAILED'} ${ms ?? '?'}ms ${url}${entry.errorMessage ? ` :: ${entry.errorMessage.slice(0, 120)}` : ''}`
+      );
+    } catch {
+      /* ignore */
+    }
+  };
+  const failAllMirrors = (): void => {
+    const srcs = mirrorAttempts.map(a => a.url).join(', ');
+    try {
+      console.error('[HomepageTest] all mirrors exhausted:', {
+        tried: mirrorAttempts.length,
+        summary: formatMirrorAttempts(mirrorAttempts),
+        online: navigator.onLine,
+        luminGlobal: (() => {
+          try {
+            const ww = window as unknown as { Lumin?: unknown };
+            return ww.Lumin == null ? 'missing' : typeof (ww.Lumin as { init?: unknown }).init;
+          } catch {
+            return 'unreadable';
+          }
+        })(),
+      });
+    } catch {
+      /* ignore */
+    }
+    fail(
+      new TypeError(
+        `lumin.min.js script tag failed to load on all ${mirrorAttempts.length} mirrors (srcs=${srcs || LUMIN_SDK_URL})`
+      ),
+      mirrorAttempts
+    );
+  };
+  const tryMirror = (index: number): void => {
+    if (index >= LUMIN_SDK_URLS.length) {
+      failAllMirrors();
+      return;
+    }
+    const url = LUMIN_SDK_URLS[index] ?? LUMIN_SDK_URL;
+    // Drop the previously failed tag so #lumin-script always reflects the
+    // in-flight mirror and env snapshots stay accurate.
+    try {
+      document.getElementById('lumin-script')?.remove();
+    } catch {
+      /* ignore */
+    }
+    const t0 = nowMs();
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const s = document.createElement('script');
+    s.id = 'lumin-script';
+    s.src = url;
+    if (LUMIN_SDK_SRI) {
+      s.integrity = LUMIN_SDK_SRI;
+      s.crossOrigin = 'anonymous';
+    }
+    const next = (): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      tryMirror(index + 1);
+    };
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const ms = Math.round(nowMs() - t0);
+      recordAttempt(url, false, ms, new DOMException(`script load timed out after ${SCRIPT_TIMEOUT_MS}ms`, 'AbortError'));
+      try {
+        s.remove();
+      } catch {
+        /* ignore */
+      }
+      tryMirror(index + 1);
+    }, SCRIPT_TIMEOUT_MS);
+    s.onload = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const ms = Math.round(nowMs() - t0);
+      const ww = window as unknown as { Lumin?: { init?: unknown } };
+      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+        recordAttempt(url, true, ms);
+        start();
+      } else {
+        // Loaded but did not execute: CSP/adblock/filter stripped it.
+        recordAttempt(
+          url,
+          false,
+          ms,
+          new TypeError(`script loaded but Lumin global missing after load (src=${url})`)
+        );
+        tryMirror(index + 1);
+      }
+    };
+    s.onerror = () => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      const ms = Math.round(nowMs() - t0);
+      recordAttempt(url, false, ms, new TypeError(`lumin.min.js script tag failed to load (src=${url})`));
+      tryMirror(index + 1);
+    };
+    document.body.appendChild(s);
+  };
   const existing = document.getElementById('lumin-script');
   if (existing) {
-    existing.addEventListener('load', start, { once: true });
+    const existingSrc =
+      (existing as HTMLScriptElement).src || existing.getAttribute('src') || LUMIN_SDK_URL;
+    const existingIdx = LUMIN_SDK_URLS.indexOf(existingSrc);
+    // If the tag already finished loading and exposed Lumin, use it.
+    try {
+      const ww = window as unknown as { Lumin?: { init?: unknown } };
+      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+        start();
+        return;
+      }
+    } catch {
+      /* fall through to listeners */
+    }
+    existing.addEventListener('load', () => {
+      const ww = window as unknown as { Lumin?: { init?: unknown } };
+      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+        recordAttempt(existingSrc, true, null);
+        start();
+      } else {
+        recordAttempt(
+          existingSrc,
+          false,
+          null,
+          new TypeError(`script loaded but Lumin global missing after load (src=${existingSrc})`)
+        );
+        tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
+      }
+    }, { once: true });
     existing.addEventListener(
       'error',
-      () =>
-        fail(
-          new TypeError(
-            `lumin.min.js script tag failed to load (src=${(existing as HTMLScriptElement).src || LUMIN_SDK_URL})`
-          )
-        ),
+      () => {
+        recordAttempt(
+          existingSrc,
+          false,
+          null,
+          new TypeError(`lumin.min.js script tag failed to load (src=${existingSrc})`)
+        );
+        tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
+      },
       { once: true }
     );
     return;
   }
-  const s = document.createElement('script');
-  s.id = 'lumin-script';
-  s.src = LUMIN_SDK_URL;
-  if (LUMIN_SDK_SRI) {
-    s.integrity = LUMIN_SDK_SRI;
-    s.crossOrigin = 'anonymous';
-  }
-  s.onload = start;
-  s.onerror = () =>
-    fail(new TypeError(`lumin.min.js script tag failed to load (src=${LUMIN_SDK_URL})`));
-  document.body.appendChild(s);
+  tryMirror(0);
 }
 
 /** Shape of the event captured from `beforeinstallprompt`. */

@@ -221,12 +221,46 @@ export function buildGameIframeHtml(url: string): string {
 // Lumin SDK has no version tags (jsdelivr versions API returns []), so @latest
 // is the only working ref. Verified 2026-09-21: @1 404s, @latest 200s. If the
 // repo ever publishes tags, pin here and add the SRI hash alongside.
+//
+// Mirror verification 2026-10-14 (sha cc6ccb7c, 184515B, application/javascript):
+//   canonical + fastly/gcore/testingcf POPs are byte-identical. All npm-based
+//   URLs (unpkg, esm.sh, skypack, jsdelivr /npm/) 404 because no npm package
+//   named `luminsdk` exists; cdnjs/gitlab/codepen/statically/raw all 404, empty,
+//   or wrong MIME (raw serves text/plain+nosniff, unusable as <script src>).
+// Only jsDelivr POPs survived, so they beat a cdn.jsdelivr.net-only DNS block
+// but NOT a keyword filter on `luminsdk`. Keep the gh-path form everywhere:
+// the /npm/ form 404s even on working POPs.
 export const LUMIN_SDK_URL = 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
+export const LUMIN_SDK_URLS: readonly string[] = [
+  'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://fastly.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+];
 export const LUMIN_SDK_SRI = '';
 
+export interface LuminMirrorAttempt {
+  url: string;
+  ok: boolean;
+  ms: number | null;
+  errorName: string | null;
+  errorMessage: string | null;
+}
+
+export function formatMirrorAttempts(attempts: LuminMirrorAttempt[]): string {
+  return attempts
+    .map((a, i) => {
+      const ms = a.ms == null ? '?' : `${a.ms}ms`;
+      return a.ok
+        ? `#${i + 1} OK ${ms} ${a.url}`
+        : `#${i + 1} FAIL ${ms} ${a.url} err=${a.errorName ?? '?'}: ${(a.errorMessage ?? '').slice(0, 140)}`;
+    })
+    .join('\n');
+}
+
 export function getTestPageHtml(): string {
-  const integrity = LUMIN_SDK_SRI ? ` integrity="${LUMIN_SDK_SRI}" crossorigin="anonymous"` : '';
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>html,body{margin:0;width:100%;min-height:100%;overflow:auto;background:#111}body{font-family:Segoe UI,system-ui,sans-serif}#games{width:100%;min-height:100vh;background:#111}</style></head><body><div id="games"></div><script src="${LUMIN_SDK_URL}"${integrity}></script><script>Lumin.init({container:document.getElementById("games"),theme:"dark"});</script></body></html>`;
+  const urls = JSON.stringify(LUMIN_SDK_URLS);
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>html,body{margin:0;width:100%;min-height:100%;overflow:auto;background:#111}body{font-family:Segoe UI,system-ui,sans-serif}#games{width:100%;min-height:100vh;background:#111}#lumin-mirror-log{color:#888;font-size:12px;padding:12px;white-space:pre-wrap;word-break:break-all}</style></head><body><div id="games"></div><div id="lumin-mirror-log"></div><script>(function(){var urls=${urls};var logEl=document.getElementById("lumin-mirror-log");function log(m){try{console.log("[LuminMirror] "+m);if(logEl)logEl.textContent+=m+"\\n";}catch(e){}}function load(i){if(i>=urls.length){log("all "+urls.length+" mirrors failed");return;}log("trying mirror "+(i+1)+"/"+urls.length+": "+urls[i]);var s=document.createElement("script");s.src=urls[i];s.onload=function(){log("loaded mirror "+(i+1)+", calling Lumin.init");try{var r=Lumin.init({container:document.getElementById("games"),theme:"dark"});if(r&&r.catch)r.catch(function(e){log("init rejected on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);});}catch(e){log("init threw on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);}};s.onerror=function(){log("script error on mirror "+(i+1)+": "+urls[i]);load(i+1);};document.head.appendChild(s);}load(0);})();</script></body></html>`;
 }
 
 export function showErrorToast(msg: string): void {

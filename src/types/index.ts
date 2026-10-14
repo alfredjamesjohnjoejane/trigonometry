@@ -108,6 +108,18 @@ export const GRADIENTS = [
 export const CDN_TARGETS: CDNTarget[] = [
   { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/favicon.ico' },
   { name: 'Lumin SDK', url: 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js' },
+  {
+    name: 'Lumin SDK (fastly)',
+    url: 'https://fastly.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  },
+  {
+    name: 'Lumin SDK (gcore)',
+    url: 'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  },
+  {
+    name: 'Lumin SDK (testingcf)',
+    url: 'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  },
 ];
 
 export const CLOAK_PRESETS = {

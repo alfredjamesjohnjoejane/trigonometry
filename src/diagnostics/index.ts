@@ -462,17 +462,48 @@ export function defaultProbeList(): Array<{ name: string; url: string }> {
 
 export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
   const results: ProbeResult[] = [];
+  try {
+    console.log(`[Diag] starting probe battery: ${defaultProbeList().length} targets, timeout=${timeout}ms`);
+  } catch {
+    /* ignore */
+  }
   for (const p of defaultProbeList()) {
     // CORS first (gives HTTP status), no-cors fallback (tests reachability
     // without CORS noise). Sequential to avoid flooding throttled WiFi.
     const cors = await probeFetchCors(p.name, p.url, timeout);
     results.push(cors);
+    try {
+      console.log(
+        `[Diag] probe ${cors.ok ? 'PASS' : 'FAIL'} ${cors.ms ?? '?'}ms${cors.httpStatus == null ? '' : ` http=${cors.httpStatus}`} ${cors.method} ${cors.name}${cors.classification ? ` [${cors.classification}]` : ''}${cors.ok ? '' : ` err=${cors.errorName ?? '?'}: ${(cors.errorMessage ?? '').slice(0, 100)}`}`
+      );
+    } catch {
+      /* ignore */
+    }
     if (!cors.ok && cors.httpStatus == null) {
-      results.push(await probeFetchNoCors(`${p.name} (no-cors)`, p.url, timeout));
+      const noCors = await probeFetchNoCors(`${p.name} (no-cors)`, p.url, timeout);
+      results.push(noCors);
+      try {
+        console.log(
+          `[Diag] probe ${noCors.ok ? 'PASS' : 'FAIL'} ${noCors.ms ?? '?'}ms ${noCors.method} ${noCors.name}${noCors.classification ? ` [${noCors.classification}]` : ''}`
+        );
+      } catch {
+        /* ignore */
+      }
     }
   }
   // Favicon img probe: cheap host-reachability signal for the CDN filter case.
-  results.push(await probeImage('cdn: jsDelivr (img)', 'https://cdn.jsdelivr.net/favicon.ico'));
+  const img = await probeImage('cdn: jsDelivr (img)', 'https://cdn.jsdelivr.net/favicon.ico');
+  results.push(img);
+  try {
+    const pass = results.filter(r => r.ok).length;
+    const luminRows = results.filter(r => r.name.includes('Lumin SDK'));
+    const luminPass = luminRows.filter(r => r.ok).length;
+    console.log(
+      `[Diag] probe battery done: ${pass}/${results.length} pass, Lumin mirrors ${luminPass}/${luminRows.length} pass`
+    );
+  } catch {
+    /* ignore */
+  }
   return results;
 }
 
@@ -481,6 +512,13 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
   const w = window as unknown as { Lumin?: { init?: unknown } };
   const present = w.Lumin != null;
   const initType = typeof w.Lumin?.init;
+  const scriptSrc = (() => {
+    try {
+      return (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ?? null;
+    } catch {
+      return null;
+    }
+  })();
   const out: LuminAttempt = {
     attempted: false,
     present,
@@ -490,7 +528,22 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
     errorMessage: null,
     ms: null,
   };
-  if (!present || typeof w.Lumin?.init !== 'function') return out;
+  try {
+    console.log(
+      `[Diag] lumin probe: present=${present} initType=${initType} script=${scriptSrc ?? 'none'}`
+    );
+  } catch {
+    /* ignore */
+  }
+  if (!present || typeof w.Lumin?.init !== 'function') {
+    try {
+      const attempts = (window as unknown as Record<string, unknown>).__luminMirrorAttempts;
+      if (Array.isArray(attempts)) console.log(`[Diag] mirror attempts on record: ${attempts.length}`);
+    } catch {
+      /* ignore */
+    }
+    return out;
+  }
   out.attempted = true;
   const start = now();
   const sandbox = document.createElement('div');
@@ -506,10 +559,20 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
     ]);
     out.ms = Math.round(now() - start);
     out.ok = true;
+    try {
+      console.log(`[Diag] lumin.init OK ${out.ms}ms`);
+    } catch {
+      /* ignore */
+    }
   } catch (err) {
     out.ms = Math.round(now() - start);
     out.errorName = err instanceof Error ? err.name : typeof err;
     out.errorMessage = describeError(err).slice(0, 500);
+    try {
+      console.log(`[Diag] lumin.init FAIL ${out.ms}ms ${out.errorName}: ${(out.errorMessage ?? '').slice(0, 160)}`);
+    } catch {
+      /* ignore */
+    }
   }
   return out;
 }
@@ -522,11 +585,23 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   const anyNoCorsOk = probes.some(p => p.name.includes('no-cors') && p.ok);
   const anyTimeout = probes.some(p => p.classification?.startsWith('timeout'));
   const slow = probes.some(p => p.ok && p.ms != null && p.ms > 3000);
+  // Mirror-aware breakdown: all Lumin mirror probes share the
+  // /gh/luminsdk/script path across jsDelivr POPs, so a split result means a
+  // single-POP DNS block (fallback should save us) while all-fail means a
+  // path/keyword filter (fallback cannot save us).
+  const luminProbes = probes.filter(p => p.name.includes('Lumin SDK') && !p.name.includes('no-cors'));
+  const luminOk = luminProbes.filter(p => p.ok);
+  const luminFail = luminProbes.filter(p => !p.ok);
+  const faviconOk = probes.some(p => p.name === 'cdn: jsDelivr' && p.ok);
 
   if (!sameOriginOk && !cdnOk)
     return 'OFFLINE-or-captive-portal: this site itself is unreachable. Join WiFi / complete the login page, then retry.';
   if (sameOriginOk && !cdnOk && !anyNoCorsOk)
     return 'SCHOOL-FILTER blocking cdn.jsdelivr.net: site loads but the game CDN is unreachable. Allowlist cdn.jsdelivr.net (and Lumin hosts) or use another network.';
+  if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
+    return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
+  if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
+    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — mirror fallback cannot help. Allowlist */gh/luminsdk/script* or use another network.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
   if (lumin.present && lumin.attempted && !lumin.ok)
@@ -539,18 +614,52 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
 }
 
 export function buildChecklist(report: DiagReport): string[] {
+  const luminProbes = report.probes.filter(
+    p => p.name.includes('Lumin SDK') && !p.name.includes('no-cors')
+  );
+  const luminOk = luminProbes.filter(p => p.ok).length;
   return [
     `1. Browser online flag: ${report.env.onLine ? 'ONLINE' : 'OFFLINE'} — if OFFLINE, rejoin WiFi / accept the captive portal.`,
-    '2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net.',
-    '3. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
-    '4. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
-    '5. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
+    `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
+    '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; fallback cannot help. Copy the Lumin mirror rows for IT.',
+    '4. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
+    '5. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
+    '6. Loader tries mirrors in order (cdn → fastly → gcore → testingcf); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror breakdown.',
+    '7. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
   ];
+}
+
+export function getMirrorAttemptsFromWindow(): Array<{
+  url: string;
+  ok: boolean;
+  ms: number | null;
+  errorName: string | null;
+  errorMessage: string | null;
+}> {
+  try {
+    const w = window as unknown as Record<string, unknown>;
+    const a = w.__luminMirrorAttempts;
+    if (Array.isArray(a)) return a as never;
+  } catch {
+    /* ignore */
+  }
+  return [];
 }
 
 export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
   installLogCapture();
   const env = getEnvironmentSnapshot();
+  try {
+    console.log('[Diag] env:', {
+      href: env.href,
+      onLine: env.onLine,
+      luminGlobal: env.luminGlobal,
+      luminScript: env.luminScriptSrc,
+      csp: env.csp?.slice(0, 120),
+    });
+  } catch {
+    /* ignore */
+  }
   const probes = await runNetworkProbes(timeout).catch((e): ProbeResult[] => [
     {
       name: 'probe-runner',
@@ -576,13 +685,27 @@ export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
       ms: null,
     })
   );
+  try {
+    console.log('[Diag] lumin result:', {
+      attempted: lumin.attempted,
+      present: lumin.present,
+      ok: lumin.ok,
+      err: lumin.errorName ? `${lumin.errorName}: ${(lumin.errorMessage ?? '').slice(0, 120)}` : null,
+      ms: lumin.ms,
+    });
+  } catch {
+    /* ignore */
+  }
+  const mirrorLines = getMirrorAttemptsFromWindow().map(
+    a => `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
+  );
   const partial: DiagReport = {
     version: 1,
     createdAt: new Date().toISOString(),
     env,
     probes,
     lumin,
-    recentLogs: [...recentLogs].slice(-40),
+    recentLogs: [...mirrorLines, ...recentLogs].slice(-40),
     likelyCause: '',
     checklist: [],
   };
@@ -591,6 +714,7 @@ export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
   saveLastReport(partial);
   try {
     console.log('[Diag] likely cause:', partial.likelyCause);
+    console.log('[Diag] full report saved; use Copy report to export.');
   } catch {
     /* ignore */
   }
@@ -609,9 +733,19 @@ export function formatReportText(r: DiagReport): string {
   );
   lines.push(`lumin: global=${r.env.luminGlobal} script=${r.env.luminScriptSrc ?? 'none'}`);
   lines.push(`sw-controller: ${r.env.serviceWorkerController}`);
+  lines.push(`csp: ${(r.env.csp ?? 'none').slice(0, 200)}`);
   lines.push('');
   lines.push(`LIKELY CAUSE: ${r.likelyCause}`);
   lines.push('');
+  const luminRows = r.probes.filter(p => p.name.includes('Lumin SDK'));
+  if (luminRows.length) {
+    const okRows = luminRows.filter(p => p.ok);
+    lines.push(`--- lumin mirrors (${okRows.length}/${luminRows.length} reachable) ---`);
+    for (const p of luminRows) {
+      lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
+    }
+    lines.push('');
+  }
   lines.push('--- probes ---');
   for (const p of r.probes) {
     const status = p.ok ? 'PASS' : 'FAIL';

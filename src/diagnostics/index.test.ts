@@ -131,6 +131,47 @@ describe('guessLikelyCause', () => {
     );
     expect(cause).toMatch(/LUMIN-INIT failed/);
   });
+
+  it('detects partial mirror block when some Lumin mirrors pass', () => {
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: Lumin SDK', true),
+        probe('cdn: Lumin SDK (fastly)', false),
+      ],
+      {
+        attempted: false,
+        present: false,
+        initType: 'undefined',
+        ok: false,
+        errorName: null,
+        errorMessage: null,
+        ms: null,
+      }
+    );
+    expect(cause).toMatch(/PARTIAL-MIRROR-BLOCK/);
+  });
+
+  it('detects path filter when all Lumin mirrors fail but favicon passes', () => {
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: jsDelivr', true),
+        probe('cdn: Lumin SDK', false),
+        probe('cdn: Lumin SDK (fastly)', false),
+      ],
+      {
+        attempted: false,
+        present: false,
+        initType: 'undefined',
+        ok: false,
+        errorName: null,
+        errorMessage: null,
+        ms: null,
+      }
+    );
+    expect(cause).toMatch(/FILTER-ON-LUMIN-PATH/);
+  });
 });
 
 describe('formatReportText', () => {

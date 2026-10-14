@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { escapeAttr, isSafeHttpUrl, buildGameIframeHtml } from './index.js';
+import {
+  escapeAttr,
+  isSafeHttpUrl,
+  buildGameIframeHtml,
+  LUMIN_SDK_URLS,
+  formatMirrorAttempts,
+  getTestPageHtml,
+} from './index.js';
 
 describe('escapeAttr', () => {
   it('escapes HTML attribute breakouts', () => {
@@ -47,5 +54,30 @@ describe('buildGameIframeHtml', () => {
     const html = buildGameIframeHtml('javascript:alert(1)');
     expect(html).toContain('src="/"');
     expect(html).not.toContain('javascript:');
+  });
+});
+
+describe('lumin mirrors', () => {
+  it('lists only verified gh-path mirrors', () => {
+    expect(LUMIN_SDK_URLS.length).toBe(4);
+    for (const u of LUMIN_SDK_URLS) {
+      expect(u).toContain('/gh/luminsdk/script');
+      expect(u).not.toContain('/npm/luminsdk');
+    }
+  });
+
+  it('formats mirror attempts for logs and reports', () => {
+    const text = formatMirrorAttempts([
+      { url: 'https://a/x.js', ok: false, ms: 12, errorName: 'TypeError', errorMessage: 'Failed to fetch' },
+      { url: 'https://b/x.js', ok: true, ms: 50, errorName: null, errorMessage: null },
+    ]);
+    expect(text).toContain('FAIL');
+    expect(text).toContain('OK');
+  });
+
+  it('test page tries mirrors in order', () => {
+    const html = getTestPageHtml();
+    expect(html).toContain('fastly.jsdelivr.net/gh/luminsdk/script');
+    expect(html).toContain('Lumin.init');
   });
 });
