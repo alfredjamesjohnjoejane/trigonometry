@@ -671,7 +671,9 @@ function initHomepageTest(): void {
     mount.dataset.ready = '0';
     mount.textContent = '';
     const errText = rawErr === undefined ? '' : describeError(rawErr);
-    const mirrorText = mirrorAttempts.length ? `\nMirror attempts:\n${formatMirrorAttempts(mirrorAttempts)}` : '';
+    const mirrorText = mirrorAttempts.length
+      ? `\nMirror attempts:\n${formatMirrorAttempts(mirrorAttempts)}`
+      : '';
     const combinedErrText = errText + mirrorText;
     const errName =
       rawErr instanceof Error ? rawErr.name : rawErr === undefined ? '' : typeof rawErr;
@@ -791,7 +793,9 @@ function initHomepageTest(): void {
         (mirrorAttempts.length ? `${formatMirrorAttempts(mirrorAttempts)}\n` : '') +
         `script src: ${(() => {
           try {
-            return (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ?? 'none';
+            return (
+              (document.getElementById('lumin-script') as HTMLScriptElement | null)?.src ?? 'none'
+            );
           } catch {
             return 'unreadable';
           }
@@ -891,12 +895,7 @@ function initHomepageTest(): void {
       return Date.now();
     }
   };
-  const recordAttempt = (
-    url: string,
-    ok: boolean,
-    ms: number | null,
-    err?: unknown
-  ): void => {
+  const recordAttempt = (url: string, ok: boolean, ms: number | null, err?: unknown): void => {
     const entry: LuminMirrorAttempt = {
       url,
       ok,
@@ -962,17 +961,16 @@ function initHomepageTest(): void {
       s.integrity = LUMIN_SDK_SRI;
       s.crossOrigin = 'anonymous';
     }
-    const next = (): void => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      tryMirror(index + 1);
-    };
     timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       const ms = Math.round(nowMs() - t0);
-      recordAttempt(url, false, ms, new DOMException(`script load timed out after ${SCRIPT_TIMEOUT_MS}ms`, 'AbortError'));
+      recordAttempt(
+        url,
+        false,
+        ms,
+        new DOMException(`script load timed out after ${SCRIPT_TIMEOUT_MS}ms`, 'AbortError')
+      );
       try {
         s.remove();
       } catch {
@@ -1005,7 +1003,12 @@ function initHomepageTest(): void {
       settled = true;
       if (timer) clearTimeout(timer);
       const ms = Math.round(nowMs() - t0);
-      recordAttempt(url, false, ms, new TypeError(`lumin.min.js script tag failed to load (src=${url})`));
+      recordAttempt(
+        url,
+        false,
+        ms,
+        new TypeError(`lumin.min.js script tag failed to load (src=${url})`)
+      );
       tryMirror(index + 1);
     };
     document.body.appendChild(s);
@@ -1025,21 +1028,25 @@ function initHomepageTest(): void {
     } catch {
       /* fall through to listeners */
     }
-    existing.addEventListener('load', () => {
-      const ww = window as unknown as { Lumin?: { init?: unknown } };
-      if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-        recordAttempt(existingSrc, true, null);
-        start();
-      } else {
-        recordAttempt(
-          existingSrc,
-          false,
-          null,
-          new TypeError(`script loaded but Lumin global missing after load (src=${existingSrc})`)
-        );
-        tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
-      }
-    }, { once: true });
+    existing.addEventListener(
+      'load',
+      () => {
+        const ww = window as unknown as { Lumin?: { init?: unknown } };
+        if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+          recordAttempt(existingSrc, true, null);
+          start();
+        } else {
+          recordAttempt(
+            existingSrc,
+            false,
+            null,
+            new TypeError(`script loaded but Lumin global missing after load (src=${existingSrc})`)
+          );
+          tryMirror(existingIdx >= 0 ? existingIdx + 1 : 1);
+        }
+      },
+      { once: true }
+    );
     existing.addEventListener(
       'error',
       () => {

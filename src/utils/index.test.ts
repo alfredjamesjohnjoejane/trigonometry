@@ -68,7 +68,13 @@ describe('lumin mirrors', () => {
 
   it('formats mirror attempts for logs and reports', () => {
     const text = formatMirrorAttempts([
-      { url: 'https://a/x.js', ok: false, ms: 12, errorName: 'TypeError', errorMessage: 'Failed to fetch' },
+      {
+        url: 'https://a/x.js',
+        ok: false,
+        ms: 12,
+        errorName: 'TypeError',
+        errorMessage: 'Failed to fetch',
+      },
       { url: 'https://b/x.js', ok: true, ms: 50, errorName: null, errorMessage: null },
     ]);
     expect(text).toContain('FAIL');

@@ -463,7 +463,9 @@ export function defaultProbeList(): Array<{ name: string; url: string }> {
 export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
   const results: ProbeResult[] = [];
   try {
-    console.log(`[Diag] starting probe battery: ${defaultProbeList().length} targets, timeout=${timeout}ms`);
+    console.log(
+      `[Diag] starting probe battery: ${defaultProbeList().length} targets, timeout=${timeout}ms`
+    );
   } catch {
     /* ignore */
   }
@@ -538,7 +540,8 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
   if (!present || typeof w.Lumin?.init !== 'function') {
     try {
       const attempts = (window as unknown as Record<string, unknown>).__luminMirrorAttempts;
-      if (Array.isArray(attempts)) console.log(`[Diag] mirror attempts on record: ${attempts.length}`);
+      if (Array.isArray(attempts))
+        console.log(`[Diag] mirror attempts on record: ${attempts.length}`);
     } catch {
       /* ignore */
     }
@@ -569,7 +572,9 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
     out.errorName = err instanceof Error ? err.name : typeof err;
     out.errorMessage = describeError(err).slice(0, 500);
     try {
-      console.log(`[Diag] lumin.init FAIL ${out.ms}ms ${out.errorName}: ${(out.errorMessage ?? '').slice(0, 160)}`);
+      console.log(
+        `[Diag] lumin.init FAIL ${out.ms}ms ${out.errorName}: ${(out.errorMessage ?? '').slice(0, 160)}`
+      );
     } catch {
       /* ignore */
     }
@@ -589,7 +594,9 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   // /gh/luminsdk/script path across jsDelivr POPs, so a split result means a
   // single-POP DNS block (fallback should save us) while all-fail means a
   // path/keyword filter (fallback cannot save us).
-  const luminProbes = probes.filter(p => p.name.includes('Lumin SDK') && !p.name.includes('no-cors'));
+  const luminProbes = probes.filter(
+    p => p.name.includes('Lumin SDK') && !p.name.includes('no-cors')
+  );
   const luminOk = luminProbes.filter(p => p.ok);
   const luminFail = luminProbes.filter(p => !p.ok);
   const faviconOk = probes.some(p => p.name === 'cdn: jsDelivr' && p.ok);
@@ -690,14 +697,17 @@ export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
       attempted: lumin.attempted,
       present: lumin.present,
       ok: lumin.ok,
-      err: lumin.errorName ? `${lumin.errorName}: ${(lumin.errorMessage ?? '').slice(0, 120)}` : null,
+      err: lumin.errorName
+        ? `${lumin.errorName}: ${(lumin.errorMessage ?? '').slice(0, 120)}`
+        : null,
       ms: lumin.ms,
     });
   } catch {
     /* ignore */
   }
   const mirrorLines = getMirrorAttemptsFromWindow().map(
-    a => `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
+    a =>
+      `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
   );
   const partial: DiagReport = {
     version: 1,
