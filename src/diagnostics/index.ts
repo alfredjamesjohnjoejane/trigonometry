@@ -660,7 +660,7 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
     !backendAnyOk &&
     (lumin.present || luminOk.length > 0)
   )
-    return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail (worker proxy + a.luminsdk.com + mirrors). The worker proxy (/lumin/boot) should have covered a direct-host block — if it also fails, the proxy host itself is filtered. Allowlist the worker origin or a.luminsdk.com/api/v1/boot, or use another network.';
+    return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail, including the worker proxy. Boot fetches are routed via the proxy with direct fallback — if the proxy row also fails, the proxy host itself is filtered. Allowlist the worker origin or a.luminsdk.com/api/v1/boot, or use another network.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
   if (lumin.present && lumin.attempted && !lumin.ok)

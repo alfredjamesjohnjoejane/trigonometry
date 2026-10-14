@@ -34,6 +34,8 @@ import {
   type LuminMirrorAttempt,
 } from '../utils/index.js';
 import { getLuminScript, saveLuminScript } from '../lumin-store/index.js';
+import { installLuminBootProxy } from '../lumin-boot-proxy/index.js';
+import { createRaceTracker } from '../lumin-race/tracker.js';
 import { getCacheSize } from '../cache/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
 import ST from '../storage/index.js';
@@ -1001,7 +1003,8 @@ function initHomepageTest(): void {
       mirrorAttempts
     );
   };
-  const raceState = { won: false, finished: 0, timers: [] as ReturnType<typeof setTimeout>[] };
+  const raceTimers: ReturnType<typeof setTimeout>[] = [];
+  const tracker = createRaceTracker(mirrorUrls.length + 1, failAllMirrors);
   const hasLumin = (): boolean => {
     try {
       const ww = window as unknown as { Lumin?: { init?: unknown } };
@@ -1011,7 +1014,7 @@ function initHomepageTest(): void {
     }
   };
   const cleanupLosers = (winnerTagId: string): void => {
-    for (const t of raceState.timers) clearTimeout(t);
+    for (const t of raceTimers) clearTimeout(t);
     try {
       document.querySelectorAll('script[id^="lumin-script-r"], script#lumin-script').forEach(el => {
         if ((el as HTMLElement).id !== winnerTagId) el.remove();
@@ -1021,14 +1024,12 @@ function initHomepageTest(): void {
     }
   };
   const winRace = (tagId: string): void => {
-    if (raceState.won) return;
-    raceState.won = true;
+    if (!tracker.win()) return;
     cleanupLosers(tagId);
     start();
   };
   const loseMirror = (): void => {
-    raceState.finished += 1;
-    if (!raceState.won && raceState.finished >= mirrorUrls.length + 1) failAllMirrors();
+    tracker.lose();
   };
   const executeCodeViaBlob = (
     url: string,
@@ -1037,7 +1038,7 @@ function initHomepageTest(): void {
     ms: number | null,
     tagId: string
   ): void => {
-    if (raceState.won) return;
+    if (tracker.won) return;
     let href = '';
     try {
       href = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
@@ -1060,7 +1061,7 @@ function initHomepageTest(): void {
     };
     bs.onload = () => {
       done();
-      if (raceState.won) return;
+      if (tracker.won) return;
       if (hasLumin()) {
         recordAttempt(url, tier, true, ms);
         winRace(tagId);
@@ -1077,7 +1078,7 @@ function initHomepageTest(): void {
     };
     bs.onerror = () => {
       done();
-      if (raceState.won) return;
+      if (tracker.won) return;
       recordAttempt(
         url,
         tier,
@@ -1094,7 +1095,7 @@ function initHomepageTest(): void {
     const f0 = nowMs();
     void getLuminScript()
       .then(stored => {
-        if (raceState.won || !stored) {
+        if (tracker.won || !stored) {
           loseMirror();
           return;
         }
@@ -1102,12 +1103,12 @@ function initHomepageTest(): void {
         executeCodeViaBlob(`${stored.url}#idb`, 'idb', stored.code, ms, 'lumin-script-r-idb');
       })
       .catch(e => {
-        if (!raceState.won) recordAttempt('idb-store', 'idb', false, null, e);
+        if (!tracker.won) recordAttempt('idb-store', 'idb', false, null, e);
         loseMirror();
       });
   };
   const tryMirrorRace = (index: number): void => {
-    if (raceState.won) return;
+    if (tracker.won) return;
     const url = mirrorUrls[index] ?? LUMIN_SDK_URL;
     const tagId = index === 0 ? 'lumin-script' : `lumin-script-r${index}`;
     try {
@@ -1123,7 +1124,7 @@ function initHomepageTest(): void {
     // strip <script> tags while allowing fetch (CSP already allows both).
     // Successful bytes are saved to the IDB last-good store for next time.
     const tryFetchBlob = (): void => {
-      if (raceState.won) return;
+      if (tracker.won) return;
       const f0 = nowMs();
       let done = false;
       const finish = (ok: boolean, err?: unknown): void => {
@@ -1148,7 +1149,7 @@ function initHomepageTest(): void {
       try {
         void fetch(url, { signal: blobCtrl.signal, cache: 'no-store' }).then(
           res => {
-            if (raceState.won || done) return;
+            if (tracker.won || done) return;
             if (!res.ok) {
               finish(false, new TypeError(`fetch-blob HTTP ${res.status} (src=${url})`));
               return;
@@ -1156,7 +1157,7 @@ function initHomepageTest(): void {
             void res
               .text()
               .then(code => {
-                if (done || raceState.won) return;
+                if (done || tracker.won) return;
                 done = true;
                 if (blobTimer) clearTimeout(blobTimer);
                 const ms = Math.round(nowMs() - f0);
@@ -1182,7 +1183,7 @@ function initHomepageTest(): void {
       s.integrity = LUMIN_SDK_SRI;
     }
     timer = setTimeout(() => {
-      if (settled || raceState.won) return;
+      if (settled || tracker.won) return;
       settled = true;
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
@@ -1200,12 +1201,22 @@ function initHomepageTest(): void {
       tryFetchBlob();
     }, SCRIPT_TIMEOUT_MS);
     s.onload = () => {
-      if (settled || raceState.won) return;
+      if (settled || tracker.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
       const ms = Math.round(nowMs() - t0);
       if (hasLumin()) {
         recordAttempt(url, 'tag', true, ms);
+        try {
+          void fetch(url, { cache: 'no-store' })
+            .then(r => (r.ok ? r.text() : null))
+            .then(code => {
+              if (code) void saveLuminScript(url, code).catch(() => {});
+            })
+            .catch(() => {});
+        } catch {
+          /* best-effort seeding only */
+        }
         winRace(tagId);
       } else {
         // Loaded but did not execute: CSP/adblock/filter stripped it.
@@ -1221,7 +1232,7 @@ function initHomepageTest(): void {
       }
     };
     s.onerror = () => {
-      if (settled || raceState.won) return;
+      if (settled || tracker.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
       const ms = Math.round(nowMs() - t0);
@@ -1245,12 +1256,19 @@ function initHomepageTest(): void {
     start();
     return;
   }
+  // Route the stub's boot fetches through the worker proxy (direct fallback
+  // on proxy failure). Installed once per page; must precede any Lumin.init.
+  try {
+    installLuminBootProxy();
+  } catch {
+    /* diagnostics must never break loading */
+  }
   // Staggered start: IDB tier + vendor fire immediately, worker proxy ~1.2s,
   // POPs after. Early winner cancels the rest via winRace cleanup.
   tryIdbTier();
   mirrorUrls.forEach((_u, i) => {
     const t = setTimeout(() => tryMirrorRace(i), i * LUMIN_RACE_STAGGER_MS);
-    raceState.timers.push(t);
+    raceTimers.push(t);
   });
 }
 

@@ -674,6 +674,27 @@ async function proxyPosthog(request, url) {
   return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
+// Open CORS for the Lumin proxy routes only: the page may run on localhost,
+// previews, or a custom domain, and the <script crossorigin> tag requires
+// ACAO. No credentials are used, so '*' is safe here. Marketplace routes keep
+// the strict allowlist in corsHeaders().
+function luminCorsHeaders() {
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+    Vary: 'Origin',
+  };
+}
+
+function jsonOpen(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...luminCorsHeaders() },
+  });
+}
+
 // GET /lumin/script -> LUMIN_SCRIPT_UPSTREAM (cached 1h at edge + browser).
 // No luminsdk substring in the path prefix the filter sees beyond the query.
 async function proxyLuminScript() {
@@ -691,20 +712,20 @@ async function proxyLuminScript() {
       clearTimeout(timer);
     }
   } catch (err) {
-    return json({ error: 'Lumin upstream unreachable.' }, 502);
+    return jsonOpen({ error: 'Lumin upstream unreachable.' }, 502);
   }
   if (!res.ok) {
-    return json({ error: 'Lumin upstream returned ' + res.status + '.' }, 502);
+    return jsonOpen({ error: 'Lumin upstream returned ' + res.status + '.' }, 502);
   }
   const body = await res.arrayBuffer().catch(() => null);
   if (!body || body.byteLength < 50000) {
-    return json({ error: 'Lumin upstream returned suspiciously small body.' }, 502);
+    return jsonOpen({ error: 'Lumin upstream returned suspiciously small body.' }, 502);
   }
   const headers = new Headers();
   headers.set('Content-Type', 'application/javascript; charset=utf-8');
   headers.set('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
   headers.set('X-Lumin-Upstream', LUMIN_SCRIPT_UPSTREAM);
-  const cors = corsHeaders();
+  const cors = luminCorsHeaders();
   for (const [k, v] of Object.entries(cors)) headers.set(k, v);
   return new Response(body, { status: 200, headers });
 }
@@ -743,30 +764,37 @@ async function proxyLuminBoot(request, url) {
         const outHeaders = new Headers(res.headers);
         outHeaders.set('X-Lumin-Upstream', upstream);
         outHeaders.set('Cache-Control', 'no-store');
-        const cors = corsHeaders();
+        const cors = luminCorsHeaders();
         for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
         return new Response(res.body, { status: res.status, headers: outHeaders });
       }
       lastStatus = res.status;
       if (res.status === 403 || res.status === 451) continue;
       const outHeaders = new Headers(res.headers);
-      const cors = corsHeaders();
+      const cors = luminCorsHeaders();
       for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
       return new Response(res.body, { status: res.status, headers: outHeaders });
     } catch (err) {
       continue;
     }
   }
-  return json({ error: 'All Lumin boot upstreams unreachable.', upstreams: LUMIN_BOOT_UPSTREAMS.length }, lastStatus === 502 ? 502 : lastStatus);
+  return jsonOpen({ error: 'All Lumin boot upstreams unreachable.', upstreams: LUMIN_BOOT_UPSTREAMS.length }, lastStatus === 502 ? 502 : lastStatus);
 }
 
 export default {
   async fetch(request, env) {
-    if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() });
-    }
-
     const url = new URL(request.url);
+    const isLuminRoute =
+      url.pathname === '/lumin/script' ||
+      url.pathname.startsWith('/lumin/script/') ||
+      url.pathname === '/lumin/boot' ||
+      url.pathname.startsWith('/lumin/boot/');
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        status: 204,
+        headers: isLuminRoute ? luminCorsHeaders() : corsHeaders(),
+      });
+    }
 
     // /ph/* — PostHog reverse proxy (see proxyPosthog). Handled before the
     // GITHUB_TOKEN check so analytics never depends on marketplace config.
@@ -780,7 +808,7 @@ export default {
     // marketplace config.
     if (url.pathname === '/lumin/script' || url.pathname.startsWith('/lumin/script/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD' && request.method !== 'OPTIONS') {
-        return json({ error: 'Method not allowed.' }, 405);
+        return jsonOpen({ error: 'Method not allowed.' }, 405);
       }
       return proxyLuminScript();
     }
