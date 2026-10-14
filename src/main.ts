@@ -76,8 +76,31 @@ function boot(): void {
   offlineOverlay.id = 'offline-overlay';
   offlineOverlay.style.cssText =
     'position:fixed;inset:0;background:rgba(17,17,17,0.95);z-index:99999;display:flex;align-items:center;justify-content:center;color:#e0e0e0;font-family:Segoe UI,system-ui,sans-serif;display:none;';
-  offlineOverlay.innerHTML =
-    '<div style="text-align:center;padding:2rem;max-width:500px"><div style="font-size:4rem;margin-bottom:1rem">📵</div><div><h1 style="font-size:2rem;margin-bottom:1rem">You\'re Offline</h1><p style="color:#888;margin-bottom:2rem;line-height:1.6">No internet connection. Game library is unavailable.<br>Reconnect to browse and play games.</p><button onclick="window.location.reload()" style="background:#424242;color:#fff;border:none;border-radius:50px;padding:1rem 2rem;font-size:1rem;font-weight:600;cursor:pointer">Retry</button></div>';
+  offlineOverlay.replaceChildren();
+  const box = document.createElement('div');
+  box.style.cssText = 'text-align:center;padding:2rem;max-width:500px';
+  const emoji = document.createElement('div');
+  emoji.style.cssText = 'font-size:4rem;margin-bottom:1rem';
+  emoji.textContent = '📵';
+  const heading = document.createElement('h1');
+  heading.style.cssText = 'font-size:2rem;margin-bottom:1rem';
+  heading.textContent = "You're Offline";
+  const para = document.createElement('p');
+  para.style.cssText = 'color:#888;margin-bottom:2rem;line-height:1.6';
+  // Two text lines with a <br> between them — no HTML parsing of variables.
+  para.textContent = 'No internet connection. Game library is unavailable.';
+  const para2 = document.createElement('p');
+  para2.style.cssText = 'color:#888;margin-bottom:2rem;line-height:1.6';
+  para2.textContent = 'Reconnect to browse and play games.';
+  const retry = document.createElement('button');
+  retry.style.cssText =
+    'background:#424242;color:#fff;border:none;border-radius:50px;padding:1rem 2rem;font-size:1rem;font-weight:600;cursor:pointer';
+  retry.textContent = 'Retry';
+  retry.addEventListener('click', () => window.location.reload());
+  const inner = document.createElement('div');
+  inner.append(emoji, heading, para, para2, retry);
+  box.appendChild(inner);
+  offlineOverlay.appendChild(box);
   document.body.appendChild(offlineOverlay);
 
   window.addEventListener('online', () => updateOnlineStatus());

@@ -269,6 +269,11 @@ export interface LuminMirrorAttempt {
   errorMessage: string | null;
 }
 
+/**
+ * Plain-text formatter only. The returned string must only ever be assigned
+ * via textContent, console, or clipboard — never innerHTML/srcdoc — because
+ * URL and error text are interpolated without HTML escaping.
+ */
 export function formatMirrorAttempts(attempts: LuminMirrorAttempt[]): string {
   return attempts
     .map((a, i) => {
@@ -281,7 +286,10 @@ export function formatMirrorAttempts(attempts: LuminMirrorAttempt[]): string {
 }
 
 export function getTestPageHtml(): string {
-  const urls = JSON.stringify([LUMIN_VENDOR_PATH, ...LUMIN_SDK_URLS]);
+  // JSON.stringify does not escape `<`, so a `</script>` sequence inside a URL
+  // would break out of the inline script. URLs are constants today, but escape
+  // `<` defensively so this template can never become a script-breakout sink.
+  const urls = JSON.stringify([LUMIN_VENDOR_PATH, ...LUMIN_SDK_URLS]).replace(/</g, '\\x3c');
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><style>html,body{margin:0;width:100%;min-height:100%;overflow:auto;background:#111}body{font-family:Segoe UI,system-ui,sans-serif}#games{width:100%;min-height:100vh;background:#111}#lumin-mirror-log{color:#888;font-size:12px;padding:12px;white-space:pre-wrap;word-break:break-all}</style></head><body><div id="games"></div><div id="lumin-mirror-log"></div><script>(function(){var urls=${urls};var logEl=document.getElementById("lumin-mirror-log");function log(m){try{console.log("[LuminMirror] "+m);if(logEl)logEl.textContent+=m+"\\n";}catch(e){}}function load(i){if(i>=urls.length){log("all "+urls.length+" mirrors failed");return;}log("trying mirror "+(i+1)+"/"+urls.length+": "+urls[i]);var s=document.createElement("script");s.src=urls[i];s.onload=function(){log("loaded mirror "+(i+1)+", calling Lumin.init");try{var r=Lumin.init({container:document.getElementById("games"),theme:"dark"});if(r&&r.catch)r.catch(function(e){log("init rejected on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);});}catch(e){log("init threw on mirror "+(i+1)+": "+(e&&e.message||e));load(i+1);}};s.onerror=function(){log("script error on mirror "+(i+1)+": "+urls[i]);load(i+1);};document.head.appendChild(s);}load(0);})();</script></body></html>`;
 }
 

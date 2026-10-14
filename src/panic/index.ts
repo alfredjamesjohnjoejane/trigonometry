@@ -51,6 +51,10 @@ export function handlePanicKey(e: KeyboardEvent): void {
     e.preventDefault();
     e.stopPropagation();
     const u = resolvePanicUrl(ST.get('panicUrl'));
+    // Defense in depth: resolvePanicUrl already allowlists public http(s),
+    // but re-check at the navigation sink so scanners and future edits see
+    // the allowlist at the point of use.
+    if (!isSafeHttpUrl(u)) return;
     try {
       window.location.replace(u);
     } catch (err) {

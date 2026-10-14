@@ -180,14 +180,20 @@ export function openAboutBlankShell(title: string, icon: string): AboutBlankShel
       }
     }
     const d = w.document;
-    d.title = title;
+    // title assignment is a text sink (never parsed as HTML); coerce and cap
+    // length so storage-controlled text cannot bloat the new tab.
+    d.title = String(title ?? '').slice(0, 200);
     let iconEl = d.querySelector("link[rel='icon']");
     if (!iconEl) {
       iconEl = d.createElement('link');
       iconEl.setAttribute('rel', 'icon');
       d.head.appendChild(iconEl);
     }
-    iconEl.setAttribute('href', isSafeFaviconUrl(icon) ? icon : HAMMER_ICON);
+    // Allowlist at the sink: only http(s)/data-image/relative favicons reach
+    // the href attribute; anything else falls back to the bundled icon so a
+    // crafted `javascript:` URL can never become script execution.
+    const safeIcon = isSafeFaviconUrl(icon) ? icon : HAMMER_ICON;
+    iconEl.setAttribute('href', safeIcon);
     if (!d.querySelector('style[data-cloak-shell]')) {
       const st = d.createElement('style');
       st.setAttribute('data-cloak-shell', '1');

@@ -24,7 +24,6 @@ import { openAboutBlankShell, appendShellIframe, openLandingInAboutBlank } from 
 import {
   decodeMediaOS,
   showErrorToast,
-  escapeHtml,
   LUMIN_SDK_URL,
   luminScriptUrls,
   LUMIN_SDK_SRI,
@@ -434,19 +433,41 @@ async function checkGameStatus(_showToast = true): Promise<void> {
   }
 }
 
+function statusCard(): HTMLDivElement {
+  const outer = document.createElement('div');
+  outer.style.cssText =
+    'margin-top:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid var(--border);font-size:.875rem';
+  return outer;
+}
+
+function statusRow(name: string, statusText: string, statusColor: string): HTMLDivElement {
+  // Built with DOM APIs + textContent so CDN names can never parse as HTML.
+  const row = document.createElement('div');
+  row.style.cssText =
+    'display:flex;justify-content:space-between;padding:4px 0;color:var(--text-secondary);border-bottom:1px solid rgba(255,255,255,.05)';
+  const nameEl = document.createElement('span');
+  nameEl.textContent = name;
+  const statusEl = document.createElement('span');
+  statusEl.style.cssText = `font-weight:600;color:${statusColor}`;
+  statusEl.textContent = statusText;
+  row.append(nameEl, statusEl);
+  return row;
+}
+
 function updateStatusPlaceholder(): void {
   const el = document.getElementById('status-results');
   if (!el) return;
   const total = CDN_TARGETS.length;
-  el.innerHTML = `<div style="margin-top:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid var(--border);font-size:.875rem">
-    <div style="font-weight:700;margin-bottom:10px;color:var(--text-secondary)">?/${total} CDNs reachable</div>
-    ${CDN_TARGETS.map(
-      t => `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--text-secondary);border-bottom:1px solid rgba(255,255,255,.05)">
-      <span>${escapeHtml(t.name)}</span>
-      <span style="font-weight:600;color:var(--text-secondary)">⏳ ping</span>
-    </div>`
-    ).join('')}
-  </div>`;
+  el.replaceChildren();
+  const outer = statusCard();
+  const header = document.createElement('div');
+  header.style.cssText = 'font-weight:700;margin-bottom:10px;color:var(--text-secondary)';
+  header.textContent = `?/${total} CDNs reachable`;
+  outer.appendChild(header);
+  for (const t of CDN_TARGETS) {
+    outer.appendChild(statusRow(t.name, '⏳ ping', 'var(--text-secondary)'));
+  }
+  el.appendChild(outer);
 }
 
 function updateStatusDisplay(results: StatusResult[], online: boolean): void {
@@ -457,17 +478,17 @@ function updateStatusDisplay(results: StatusResult[], online: boolean): void {
   const label = online
     ? `✅ Online (${passCount}/${total} CDNs reachable)`
     : `❌ Offline (${total - passCount}/${total} CDNs unreachable)`;
-  el.innerHTML = `<div style="margin-top:12px;padding:14px;border-radius:10px;background:rgba(255,255,255,.05);border:1px solid var(--border);font-size:.875rem">
-    <div style="font-weight:700;margin-bottom:10px;color:${online ? '#4caf50' : '#f44336'}">${escapeHtml(label)}</div>
-    ${results
-      .map(
-        r => `<div style="display:flex;justify-content:space-between;padding:4px 0;color:var(--text-secondary);border-bottom:1px solid rgba(255,255,255,.05)">
-      <span>${escapeHtml(r.name)}</span>
-      <span style="font-weight:600;color:${r.status === 'pass' ? '#4caf50' : '#f44336'}">${r.status === 'pass' ? `✓ ${r.ms}ms` : '✗'}</span>
-    </div>`
-      )
-      .join('')}
-  </div>`;
+  el.replaceChildren();
+  const outer = statusCard();
+  const header = document.createElement('div');
+  header.style.cssText = `font-weight:700;margin-bottom:10px;color:${online ? '#4caf50' : '#f44336'}`;
+  header.textContent = label;
+  outer.appendChild(header);
+  for (const r of results) {
+    const ok = r.status === 'pass';
+    outer.appendChild(statusRow(r.name, ok ? `✓ ${r.ms}ms` : '✗', ok ? '#4caf50' : '#f44336'));
+  }
+  el.appendChild(outer);
 }
 
 function showMaintenance(): void {

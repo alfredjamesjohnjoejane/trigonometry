@@ -136,6 +136,9 @@ function shouldOpenInNewTab(url: string): boolean {
 // tab would re-URL it to this page's URL in current Chrome. Returns false
 // when the popup was blocked so callers can fall back.
 function openGameShellTab(url: string, name: string): boolean {
+  // Allowlist at the sink: a poisoned catalog entry must never turn the
+  // game frame or a new tab into `javascript:` execution.
+  if (!isSafeHttpUrl(url)) return false;
   const shell = openAboutBlankShell(name, GAME_TAB_ICON);
   if (!shell) return false;
   const d = shell.doc;
@@ -203,6 +206,10 @@ function openDirectGameTab(url: string): void {
     if (openGameShellTab(url, game.n)) return;
   } catch {
     /* fall through to direct open */
+  }
+  if (!isSafeHttpUrl(url)) {
+    showErrorToast('Blocked unsafe game URL');
+    return;
   }
   try {
     const w = window.open(url, '_blank', 'noopener,noreferrer');
@@ -413,7 +420,13 @@ function renderGames(): void {
   if (!grid) return;
 
   if (GAMES_ERR) {
-    grid.innerHTML = `<div style="color:var(--text-secondary);text-align:center;padding:80px;grid-column:1/-1">⚠️ ${GAMES_ERR}</div>`;
+    grid.replaceChildren();
+    const msg = document.createElement('div');
+    msg.style.cssText =
+      'color:var(--text-secondary);text-align:center;padding:80px;grid-column:1/-1';
+    // textContent, never innerHTML: error text must not parse as HTML.
+    msg.textContent = `⚠️ ${GAMES_ERR}`;
+    grid.appendChild(msg);
     return;
   }
 
@@ -450,8 +463,11 @@ function renderGames(): void {
   grid.replaceChildren();
 
   if (!list.length) {
-    grid.innerHTML =
-      '<div style="color:var(--text-secondary);text-align:center;padding:80px;grid-column:1/-1">No games found</div>';
+    const empty = document.createElement('div');
+    empty.style.cssText =
+      'color:var(--text-secondary);text-align:center;padding:80px;grid-column:1/-1';
+    empty.textContent = 'No games found';
+    grid.appendChild(empty);
     return;
   }
 
