@@ -5,6 +5,7 @@ import {
   formatReportText,
   getEnvironmentSnapshot,
   guessLikelyCause,
+  probeBackend,
   _resetLogs,
   type DiagReport,
   type ProbeResult,
@@ -172,6 +173,48 @@ describe('guessLikelyCause', () => {
     );
     expect(cause).toMatch(/FILTER-ON-LUMIN-PATH/);
   });
+
+  it('detects backend block when scripts pass but all backends fail', () => {
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: Lumin SDK', true),
+        probe('backend: Lumin backend (primary)', false),
+        probe('backend: Lumin backend (mirror 1)', false),
+      ],
+      {
+        attempted: true,
+        present: true,
+        initType: 'function',
+        ok: false,
+        errorName: 'Error',
+        errorMessage: 'boot',
+        ms: 5000,
+      }
+    );
+    expect(cause).toMatch(/LUMIN-BACKEND-BLOCKED/);
+  });
+
+  it('does not cry backend-blocked when a no-cors row shows the host alive', () => {
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: Lumin SDK', true),
+        probe('backend: Lumin backend (primary)', false),
+        probe('backend: Lumin backend (primary) (no-cors)', true),
+      ],
+      {
+        attempted: true,
+        present: true,
+        initType: 'function',
+        ok: false,
+        errorName: 'Error',
+        errorMessage: 'boot',
+        ms: 5000,
+      }
+    );
+    expect(cause).not.toMatch(/LUMIN-BACKEND-BLOCKED/);
+  });
 });
 
 describe('formatReportText', () => {
@@ -193,5 +236,26 @@ describe('getEnvironmentSnapshot', () => {
     expect(typeof env.href).toBe('string');
     expect(typeof env.onLine).toBe('boolean');
     expect(typeof env.luminGlobal).toBe('string');
+  });
+});
+
+describe('probeBackend', () => {
+  it('treats bare-path 404 as host-reachable (boot token appended at runtime)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      async () => new Response('none', { status: 404, headers: { 'content-type': 'text/plain' } })
+    );
+    const r = await probeBackend('backend: x', 'https://example.com/api/v1/boot', 1000);
+    expect(r.ok).toBe(true);
+    expect(r.classification).toBe('http-404-reachable');
+  });
+
+  it('keeps network failures as failures', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const r = await probeBackend('backend: x', 'https://example.com/api/v1/boot', 1000);
+    expect(r.ok).toBe(false);
+    expect(r.httpStatus).toBeNull();
   });
 });

@@ -1,5 +1,18 @@
 const CACHE_NAME = 'jesherhead-v{{VERSION}}';
 const IMAGE_CACHE_NAME = 'jesherhead-images-v{{VERSION}}';
+// Lumin SDK runtime cache. Deliberately version-INDEPENDENT: a student who
+// loads lumin.min.js once off-filter (home) keeps it across deploys, so the
+// school network never needs to fetch it again. Never deleted by activate.
+const LUMIN_CACHE_NAME = 'jesherhead-lumin-v1';
+const LUMIN_CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30;
+// Exact cross-origin script URLs the loader tries (plus the same-origin
+// vendor copy, which is covered by the precache list below instead).
+const LUMIN_SCRIPT_URLS = [
+  'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://fastly.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+  'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
+];
 // Asset paths are derived from the worker's own scope (registration scope
 // ends with the base: '/' in dev, '/<repo>/' in production) instead of a
 // hardcoded prefix, so the precache list works in every environment.
@@ -31,6 +44,7 @@ function staticAssets() {
     'icons/icon-512x512.png',
     'icons/icon-192x192-maskable.png',
     'icons/icon-512x512-maskable.png',
+    'vendor/lumin.min.js',
   ].map((p) => base + p);
 }
 
@@ -70,7 +84,9 @@ self.addEventListener('activate', (event) => {
       .then((cacheNames) => {
         return Promise.all(
           cacheNames
-            .filter((name) => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME)
+            // LUMIN_CACHE_NAME is version-independent on purpose (see above)
+            // and must survive deploys — only the rotating caches are purged.
+            .filter((name) => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME && name !== LUMIN_CACHE_NAME)
             .map((name) => {
               console.log('[SW] Deleting old cache:', name);
               return caches.delete(name);
@@ -131,6 +147,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Lumin SDK scripts: stale-while-revalidate in the version-independent
+  // cache. A student who loads once off-filter keeps working copies across
+  // deploys; a fast stale response also beats throttled school WiFi while a
+  // background revalidate refreshes the entry.
+  if (LUMIN_SCRIPT_URLS.some((u) => u === url.href)) {
+    event.respondWith(luminStaleWhileRevalidate(request));
+    return;
+  }
+
   if (url.origin !== location.origin) {
     if (url.pathname.endsWith('.html') || url.pathname === '/' || url.pathname.endsWith('/')) {
       event.respondWith(networkFirstWithOfflineFallback(request));
@@ -167,6 +192,50 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(networkFirstWithOfflineFallback(request));
 });
+
+async function luminStaleWhileRevalidate(request) {
+  const cache = await caches.open(LUMIN_CACHE_NAME);
+  const cached = await cache.match(request);
+  const cachedTime = (() => {
+    try {
+      const h = cached && cached.headers.get('sw-cache-date');
+      const t = h ? parseInt(h) : 0;
+      return Number.isFinite(t) ? t : 0;
+    } catch (err) {
+      return 0;
+    }
+  })();
+  const fresh = cached && Date.now() - cachedTime < LUMIN_CACHE_MAX_AGE;
+  const revalidate = (async () => {
+    try {
+      const response = await fetch(request);
+      // Only cache real script bytes: opaque failures and error pages must
+      // never poison the cache, or the school block persists after it lifts.
+      if (response.ok && (response.type === 'cors' || response.type === 'basic')) {
+        const toCache = new Response(response.clone().body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: new Headers(response.headers),
+        });
+        toCache.headers.set('sw-cache-date', Date.now().toString());
+        await cache.put(request, toCache).catch(() => {});
+      }
+    } catch (err) {}
+  })();
+  if (fresh) {
+    // Don't delay the page on the revalidate; failures stay silent.
+    revalidate.catch(() => {});
+    return cached;
+  }
+  try {
+    const response = await revalidate.then(() => cache.match(request));
+    if (response) return response;
+  } catch (err) {}
+  // Total miss or expired with network down: serve stale if we have it so a
+  // previously working copy keeps the page alive, else let the loader fail.
+  if (cached) return cached;
+  return new Response('', { status: 503, statusText: 'Service Unavailable' });
+}
 
 async function imageCacheFirst(request) {
   const cache = await caches.open(IMAGE_CACHE_NAME);

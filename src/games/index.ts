@@ -275,7 +275,12 @@ async function launchGame(url: string, name: string): Promise<void> {
       const rawCached = await getCachedGame('__TEST_LUMIN__');
       // Discard stale entries cached while the SDK URL pointed at a 404ing
       // @1 pin — otherwise the broken page persists in IndexedDB forever.
-      const cached = rawCached && !rawCached.includes('script@1/') ? rawCached : null;
+      // Also refresh pages predating the vendored same-origin copy so the
+      // vendor-first loader actually reaches users with old caches.
+      const cached =
+        rawCached && !rawCached.includes('script@1/') && rawCached.includes('vendor/lumin.min.js')
+          ? rawCached
+          : null;
       if (myLaunch !== launchSeq || !document.getElementById('go')?.classList) return;
       const testHtml = cached || getTestPageHtml();
       if (!cached) {
@@ -345,7 +350,11 @@ async function openGameTab(): Promise<void> {
     try {
       const rawCached = await getCachedGame('__TEST_LUMIN__');
       // Discard stale entries cached while the SDK URL pointed at @1 (404).
-      const cached = rawCached && !rawCached.includes('script@1/') ? rawCached : null;
+      // Also refresh pages predating the vendored same-origin copy.
+      const cached =
+        rawCached && !rawCached.includes('script@1/') && rawCached.includes('vendor/lumin.min.js')
+          ? rawCached
+          : null;
       if (myLaunch !== launchSeq) {
         try {
           shell.win.close();

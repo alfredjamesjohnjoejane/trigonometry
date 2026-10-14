@@ -1,0 +1,9 @@
+{
+  "file": "lumin.min.js",
+  "source": "https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js",
+  "vendoredAt": "2026-10-14",
+  "bytes": 184515,
+  "sha256": "cc6ccb7ca50b5ea305ba0188ffaad3ddc8090d6203af9a520e510a167e0f5855",
+  "resync": "Re-download source, verify sha256/size and that it still defines window.Lumin with init(), then replace this file and update bytes/sha256/date here.",
+  "licenseNote": "Upstream publishes no license file for this SDK. Redistribution cleared by the site owner 2026-10-14; re-confirm if the upstream adds license terms."
+}

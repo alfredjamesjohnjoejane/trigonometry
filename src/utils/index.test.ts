@@ -4,9 +4,12 @@ import {
   isSafeHttpUrl,
   buildGameIframeHtml,
   LUMIN_SDK_URLS,
+  LUMIN_VENDOR_PATH,
+  luminScriptUrls,
   formatMirrorAttempts,
   getTestPageHtml,
 } from './index.js';
+import { LUMIN_BACKEND_TARGETS } from '../types/index.js';
 
 describe('escapeAttr', () => {
   it('escapes HTML attribute breakouts', () => {
@@ -70,15 +73,37 @@ describe('lumin mirrors', () => {
     const text = formatMirrorAttempts([
       {
         url: 'https://a/x.js',
+        tier: 'tag',
         ok: false,
         ms: 12,
         errorName: 'TypeError',
         errorMessage: 'Failed to fetch',
       },
-      { url: 'https://b/x.js', ok: true, ms: 50, errorName: null, errorMessage: null },
+      {
+        url: 'https://b/x.js',
+        tier: 'fetch-blob',
+        ok: true,
+        ms: 50,
+        errorName: null,
+        errorMessage: null,
+      },
     ]);
     expect(text).toContain('FAIL');
     expect(text).toContain('OK');
+    expect(text).toContain('[tag]');
+    expect(text).toContain('[fetch-blob]');
+  });
+
+  it('puts the same-origin vendor copy first', () => {
+    expect(LUMIN_VENDOR_PATH).toBe('vendor/lumin.min.js');
+    const urls = luminScriptUrls();
+    expect(urls.length).toBe(LUMIN_SDK_URLS.length + 1);
+    expect(urls[0]).toContain('vendor/lumin.min.js');
+  });
+
+  it('lists the decoded backend boot hosts', () => {
+    expect(LUMIN_BACKEND_TARGETS.length).toBe(5);
+    expect(LUMIN_BACKEND_TARGETS[0]?.url).toContain('a.luminsdk.com');
   });
 
   it('test page tries mirrors in order', () => {

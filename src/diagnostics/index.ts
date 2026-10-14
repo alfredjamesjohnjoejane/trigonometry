@@ -16,7 +16,7 @@
  * throws — diagnostics must work especially when the network is broken.
  */
 
-import { CDN_TARGETS } from '../types/index.js';
+import { CDN_TARGETS, LUMIN_BACKEND_TARGETS } from '../types/index.js';
 import ST from '../storage/index.js';
 
 export interface ProbeResult {
@@ -456,8 +456,33 @@ export function defaultProbeList(): Array<{ name: string; url: string }> {
     { name: 'same-origin: tos', url: `${base}terms_of_service.txt` },
   ];
   for (const t of CDN_TARGETS) list.push({ name: `cdn: ${t.name}`, url: t.url });
+  for (const t of LUMIN_BACKEND_TARGETS) list.push({ name: `backend: ${t.name}`, url: t.url });
   list.push({ name: 'internet: google', url: 'https://www.google.com/favicon.ico' });
   return list;
+}
+
+/**
+ * Backend boot-host probe. The bare /api/v1/boot path 404s without the
+ * stub's ?t= token (verified 2026-10-14), so a plain fetch-cors probe would
+ * report FAIL on a perfectly reachable host. Any HTTP status except a filter
+ * block page (403/451) proves host+TLS+path are reachable — only a network
+ * error (no status) means filtered/offline.
+ */
+export async function probeBackend(
+  name: string,
+  url: string,
+  timeout = 8000
+): Promise<ProbeResult> {
+  const cors = await probeFetchCors(name, url, timeout);
+  if (cors.ok) return cors;
+  if (cors.httpStatus != null && cors.httpStatus !== 403 && cors.httpStatus !== 451) {
+    cors.ok = true;
+    cors.classification = `http-${cors.httpStatus}-reachable`;
+    cors.note =
+      'Host reachable (HTTP response without boot token — the stub appends ?t= at runtime). Filter is NOT blocking this host.';
+    return cors;
+  }
+  return cors;
 }
 
 export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
@@ -472,7 +497,10 @@ export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
   for (const p of defaultProbeList()) {
     // CORS first (gives HTTP status), no-cors fallback (tests reachability
     // without CORS noise). Sequential to avoid flooding throttled WiFi.
-    const cors = await probeFetchCors(p.name, p.url, timeout);
+    // Backend boot hosts get the token-aware probe (bare path 404s by design).
+    const cors = p.name.startsWith('backend:')
+      ? await probeBackend(p.name, p.url, timeout)
+      : await probeFetchCors(p.name, p.url, timeout);
     results.push(cors);
     try {
       console.log(
@@ -500,8 +528,10 @@ export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
     const pass = results.filter(r => r.ok).length;
     const luminRows = results.filter(r => r.name.includes('Lumin SDK'));
     const luminPass = luminRows.filter(r => r.ok).length;
+    const backendRows = results.filter(r => r.name.startsWith('backend:'));
+    const backendPass = backendRows.filter(r => r.ok).length;
     console.log(
-      `[Diag] probe battery done: ${pass}/${results.length} pass, Lumin mirrors ${luminPass}/${luminRows.length} pass`
+      `[Diag] probe battery done: ${pass}/${results.length} pass, Lumin mirrors ${luminPass}/${luminRows.length} pass, backends ${backendPass}/${backendRows.length} pass`
     );
   } catch {
     /* ignore */
@@ -600,6 +630,15 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   const luminOk = luminProbes.filter(p => p.ok);
   const luminFail = luminProbes.filter(p => !p.ok);
   const faviconOk = probes.some(p => p.name === 'cdn: jsDelivr' && p.ok);
+  // Backend boot hosts the stub fetches at Lumin.init time (decoded 2026-10-14).
+  // Script mirrors can all pass while these all fail — then the script loads
+  // but init can never succeed, no matter how many POPs we add. The ok check
+  // intentionally includes no-cors rows: a bare-path cors quirk must never
+  // read as a backend wall when the host is demonstrably reachable.
+  const backendProbes = probes.filter(
+    p => p.name.startsWith('backend:') && !p.name.includes('no-cors')
+  );
+  const backendAnyOk = probes.some(p => p.name.startsWith('backend:') && p.ok);
 
   if (!sameOriginOk && !cdnOk)
     return 'OFFLINE-or-captive-portal: this site itself is unreachable. Join WiFi / complete the login page, then retry.';
@@ -608,7 +647,14 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
     return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
   if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
-    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — mirror fallback cannot help. Allowlist */gh/luminsdk/script* or use another network.';
+    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — CDN fallback cannot help. The same-origin vendor copy (vendor/lumin.min.js) should cover this; if it does not, the vendor file itself is stale or missing.';
+  if (
+    sameOriginOk &&
+    backendProbes.length > 0 &&
+    !backendAnyOk &&
+    (lumin.present || luminOk.length > 0)
+  )
+    return 'LUMIN-BACKEND-BLOCKED: the script loads but ALL backend boot hosts fail (a.luminsdk.com + mirrors). Lumin.init can never succeed while these are filtered — allowlist a.luminsdk.com/api/v1/boot or use another network.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
   if (lumin.present && lumin.attempted && !lumin.ok)
@@ -625,19 +671,25 @@ export function buildChecklist(report: DiagReport): string[] {
     p => p.name.includes('Lumin SDK') && !p.name.includes('no-cors')
   );
   const luminOk = luminProbes.filter(p => p.ok).length;
+  const backendProbes = report.probes.filter(
+    p => p.name.startsWith('backend:') && !p.name.includes('no-cors')
+  );
+  const backendOk = backendProbes.filter(p => p.ok).length;
   return [
     `1. Browser online flag: ${report.env.onLine ? 'ONLINE' : 'OFFLINE'} — if OFFLINE, rejoin WiFi / accept the captive portal.`,
     `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
-    '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; fallback cannot help. Copy the Lumin mirror rows for IT.',
-    '4. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
-    '5. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
-    '6. Loader tries mirrors in order (cdn → fastly → gcore → testingcf); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror breakdown.',
-    '7. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
+    '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; the same-origin vendor copy (vendor/lumin.min.js) is the fix — check it loaded in the mirror rows.',
+    `4. Script loads but backend rows all fail => Lumin boot hosts are filtered (backends passing now: ${backendOk}/${backendProbes.length}). Allowlist a.luminsdk.com/api/v1/boot.`,
+    '5. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
+    '6. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
+    '7. Loader tries mirrors in order (vendor → cdn → fastly → gcore → testingcf); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror breakdown.',
+    '8. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
   ];
 }
 
 export function getMirrorAttemptsFromWindow(): Array<{
   url: string;
+  tier?: 'tag' | 'fetch-blob';
   ok: boolean;
   ms: number | null;
   errorName: string | null;
@@ -707,7 +759,7 @@ export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
   }
   const mirrorLines = getMirrorAttemptsFromWindow().map(
     a =>
-      `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
+      `[mirror] ${a.ok ? 'OK' : 'FAIL'} [${a.tier ?? 'tag'}] ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
   );
   const partial: DiagReport = {
     version: 1,
@@ -752,6 +804,15 @@ export function formatReportText(r: DiagReport): string {
     const okRows = luminRows.filter(p => p.ok);
     lines.push(`--- lumin mirrors (${okRows.length}/${luminRows.length} reachable) ---`);
     for (const p of luminRows) {
+      lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
+    }
+    lines.push('');
+  }
+  const backendRows = r.probes.filter(p => p.name.startsWith('backend:'));
+  if (backendRows.length) {
+    const okRows = backendRows.filter(p => p.ok);
+    lines.push(`--- lumin backends (${okRows.length}/${backendRows.length} reachable) ---`);
+    for (const p of backendRows) {
       lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
     }
     lines.push('');

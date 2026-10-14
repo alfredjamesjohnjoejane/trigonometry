@@ -122,6 +122,17 @@ export const CDN_TARGETS: CDNTarget[] = [
   },
 ];
 
+// Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
+// Probed by diagnostics only — not part of the games-online ping, since the
+// catalog can be browsable while Lumin init is blocked.
+export const LUMIN_BACKEND_TARGETS: CDNTarget[] = [
+  { name: 'Lumin backend (primary)', url: 'https://a.luminsdk.com/api/v1/boot' },
+  { name: 'Lumin backend (mirror 1)', url: 'https://drkesten.com/api/v1/boot' },
+  { name: 'Lumin backend (mirror 2)', url: 'https://milpagan.org/api/v1/boot' },
+  { name: 'Lumin backend (mirror 3)', url: 'https://catholicrebuttals.com/api/v1/boot' },
+  { name: 'Lumin backend (mirror 4)', url: 'https://instructure-ramen.hpsschools.org/api/v1/boot' },
+];
+
 export const CLOAK_PRESETS = {
   classroom: [
     'Google Classroom',

@@ -26,7 +26,7 @@ import {
   showErrorToast,
   escapeHtml,
   LUMIN_SDK_URL,
-  LUMIN_SDK_URLS,
+  luminScriptUrls,
   LUMIN_SDK_SRI,
   formatMirrorAttempts,
   type LuminMirrorAttempt,
@@ -706,10 +706,10 @@ function initHomepageTest(): void {
         recentLogs: mirrorAttempts.length
           ? mirrorAttempts.map(
               a =>
-                `[mirror] ${a.ok ? 'OK' : 'FAIL'} ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
+                `[mirror] ${a.ok ? 'OK' : 'FAIL'} [${a.tier}] ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
             )
           : [],
-        likelyCause: `Homepage mount failed [${classification}] after ${mirrorAttempts.length || 1} mirror(s). Press "Diagnose connection" on school WiFi for the full probe battery.`,
+        likelyCause: `Homepage mount failed [${classification}] after ${mirrorAttempts.length || 1} load attempt(s). Press "Diagnose connection" on school WiFi for the full probe battery.`,
         checklist: [
           'Press "🔍 Diagnose connection" below while still on the school network.',
           'Press "📋 Copy report" in the panel and save it — the failure code ties the two together.',
@@ -878,16 +878,19 @@ function initHomepageTest(): void {
     start();
     return;
   }
-  // Ordered fallback across verified jsDelivr POPs (byte-identical 2026-10-14).
-  // Beats a cdn.jsdelivr.net-only DNS block, not a `luminsdk` keyword filter.
+  // Ordered fallback: same-origin vendor copy first (bypasses CDN
+  // path/keyword filters entirely), then verified jsDelivr POPs. The POPs beat
+  // a cdn.jsdelivr.net-only DNS block, not a `luminsdk` keyword filter.
+  const mirrorUrls = luminScriptUrls();
   const mirrorAttempts: LuminMirrorAttempt[] = [];
   try {
     (window as unknown as Record<string, unknown>).__luminMirrorAttempts = mirrorAttempts;
-    (window as unknown as Record<string, unknown>).__luminMirrorUrls = [...LUMIN_SDK_URLS];
+    (window as unknown as Record<string, unknown>).__luminMirrorUrls = [...mirrorUrls];
   } catch {
     /* ignore */
   }
   const SCRIPT_TIMEOUT_MS = 12000;
+  const FETCH_BLOB_TIMEOUT_MS = 8000;
   const nowMs = (): number => {
     try {
       return performance.now();
@@ -895,9 +898,16 @@ function initHomepageTest(): void {
       return Date.now();
     }
   };
-  const recordAttempt = (url: string, ok: boolean, ms: number | null, err?: unknown): void => {
+  const recordAttempt = (
+    url: string,
+    tier: LuminMirrorAttempt['tier'],
+    ok: boolean,
+    ms: number | null,
+    err?: unknown
+  ): void => {
     const entry: LuminMirrorAttempt = {
       url,
+      tier,
       ok,
       ms,
       errorName: err instanceof Error ? err.name : err === undefined ? null : typeof err,
@@ -906,7 +916,7 @@ function initHomepageTest(): void {
     mirrorAttempts.push(entry);
     try {
       console.log(
-        `[HomepageTest] mirror ${mirrorAttempts.length}/${LUMIN_SDK_URLS.length} ${ok ? 'LOADED' : 'FAILED'} ${ms ?? '?'}ms ${url}${entry.errorMessage ? ` :: ${entry.errorMessage.slice(0, 120)}` : ''}`
+        `[HomepageTest] mirror ${mirrorAttempts.length} ${ok ? 'LOADED' : 'FAILED'} [${tier}] ${ms ?? '?'}ms ${url}${entry.errorMessage ? ` :: ${entry.errorMessage.slice(0, 120)}` : ''}`
       );
     } catch {
       /* ignore */
@@ -933,17 +943,17 @@ function initHomepageTest(): void {
     }
     fail(
       new TypeError(
-        `lumin.min.js script tag failed to load on all ${mirrorAttempts.length} mirrors (srcs=${srcs || LUMIN_SDK_URL})`
+        `lumin.min.js failed to load after ${mirrorAttempts.length} load attempts (srcs=${srcs || LUMIN_SDK_URL})`
       ),
       mirrorAttempts
     );
   };
   const tryMirror = (index: number): void => {
-    if (index >= LUMIN_SDK_URLS.length) {
+    if (index >= mirrorUrls.length) {
       failAllMirrors();
       return;
     }
-    const url = LUMIN_SDK_URLS[index] ?? LUMIN_SDK_URL;
+    const url = mirrorUrls[index] ?? LUMIN_SDK_URL;
     // Drop the previously failed tag so #lumin-script always reflects the
     // in-flight mirror and env snapshots stay accurate.
     try {
@@ -954,12 +964,99 @@ function initHomepageTest(): void {
     const t0 = nowMs();
     let settled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // Final tier per mirror: fetch the bytes and execute via blob URL. Same
+    // hosts, so no filter bypass — but it occasionally beats extensions that
+    // strip <script> tags while allowing fetch (CSP already allows both).
+    const tryFetchBlob = (): void => {
+      const f0 = nowMs();
+      let done = false;
+      const finish = (ok: boolean, err?: unknown): void => {
+        if (done) return;
+        done = true;
+        if (blobTimer) clearTimeout(blobTimer);
+        const ms = Math.round(nowMs() - f0);
+        if (!ok) {
+          recordAttempt(url, 'fetch-blob', false, ms, err);
+          tryMirror(index + 1);
+        }
+      };
+      const blobTimer = setTimeout(() => {
+        finish(false, new DOMException('fetch-blob timed out', 'AbortError'));
+        try {
+          blobCtrl.abort();
+        } catch {
+          /* ignore */
+        }
+      }, FETCH_BLOB_TIMEOUT_MS);
+      const blobCtrl = new AbortController();
+      const cleanupObjectUrl = (href: string): void => {
+        setTimeout(() => {
+          try {
+            URL.revokeObjectURL(href);
+          } catch {
+            /* ignore */
+          }
+        }, 5000);
+      };
+      try {
+        void fetch(url, { signal: blobCtrl.signal, cache: 'no-store' }).then(
+          res => {
+            if (!res.ok) {
+              finish(false, new TypeError(`fetch-blob HTTP ${res.status} (src=${url})`));
+              return;
+            }
+            void res
+              .blob()
+              .then(body => {
+                if (done) return;
+                const href = URL.createObjectURL(body);
+                const bs = document.createElement('script');
+                bs.id = 'lumin-script';
+                bs.src = href;
+                bs.onload = () => {
+                  if (done) return;
+                  done = true;
+                  if (blobTimer) clearTimeout(blobTimer);
+                  const ms = Math.round(nowMs() - f0);
+                  cleanupObjectUrl(href);
+                  const ww = window as unknown as { Lumin?: { init?: unknown } };
+                  if (ww.Lumin && typeof ww.Lumin.init === 'function') {
+                    recordAttempt(url, 'fetch-blob', true, ms);
+                    start();
+                  } else {
+                    recordAttempt(
+                      url,
+                      'fetch-blob',
+                      false,
+                      ms,
+                      new TypeError(`blob script loaded but Lumin global missing (src=${url})`)
+                    );
+                    tryMirror(index + 1);
+                  }
+                };
+                bs.onerror = () => {
+                  cleanupObjectUrl(href);
+                  finish(false, new TypeError(`blob script tag failed to load (src=${url})`));
+                };
+                document.body.appendChild(bs);
+              })
+              .catch(e => finish(false, e));
+          },
+          e => finish(false, e)
+        );
+      } catch (e) {
+        finish(false, e);
+      }
+    };
     const s = document.createElement('script');
     s.id = 'lumin-script';
     s.src = url;
+    // Always CORS: all mirrors send ACAO:* + JS MIME (verified 2026-10-14),
+    // so responses are `cors` (status visible, SW-cacheable) instead of
+    // opaque. Same-origin vendor URL is unaffected by the attribute.
+    s.crossOrigin = 'anonymous';
     if (LUMIN_SDK_SRI) {
       s.integrity = LUMIN_SDK_SRI;
-      s.crossOrigin = 'anonymous';
     }
     timer = setTimeout(() => {
       if (settled) return;
@@ -967,6 +1064,7 @@ function initHomepageTest(): void {
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
         url,
+        'tag',
         false,
         ms,
         new DOMException(`script load timed out after ${SCRIPT_TIMEOUT_MS}ms`, 'AbortError')
@@ -976,7 +1074,7 @@ function initHomepageTest(): void {
       } catch {
         /* ignore */
       }
-      tryMirror(index + 1);
+      tryFetchBlob();
     }, SCRIPT_TIMEOUT_MS);
     s.onload = () => {
       if (settled) return;
@@ -985,17 +1083,19 @@ function initHomepageTest(): void {
       const ms = Math.round(nowMs() - t0);
       const ww = window as unknown as { Lumin?: { init?: unknown } };
       if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-        recordAttempt(url, true, ms);
+        recordAttempt(url, 'tag', true, ms);
         start();
       } else {
         // Loaded but did not execute: CSP/adblock/filter stripped it.
+        // Try the fetch-blob tier before giving up on this mirror.
         recordAttempt(
           url,
+          'tag',
           false,
           ms,
           new TypeError(`script loaded but Lumin global missing after load (src=${url})`)
         );
-        tryMirror(index + 1);
+        tryFetchBlob();
       }
     };
     s.onerror = () => {
@@ -1005,11 +1105,12 @@ function initHomepageTest(): void {
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
         url,
+        'tag',
         false,
         ms,
         new TypeError(`lumin.min.js script tag failed to load (src=${url})`)
       );
-      tryMirror(index + 1);
+      tryFetchBlob();
     };
     document.body.appendChild(s);
   };
@@ -1017,7 +1118,7 @@ function initHomepageTest(): void {
   if (existing) {
     const existingSrc =
       (existing as HTMLScriptElement).src || existing.getAttribute('src') || LUMIN_SDK_URL;
-    const existingIdx = LUMIN_SDK_URLS.indexOf(existingSrc);
+    const existingIdx = mirrorUrls.indexOf(existingSrc);
     // If the tag already finished loading and exposed Lumin, use it.
     try {
       const ww = window as unknown as { Lumin?: { init?: unknown } };
@@ -1033,11 +1134,12 @@ function initHomepageTest(): void {
       () => {
         const ww = window as unknown as { Lumin?: { init?: unknown } };
         if (ww.Lumin && typeof ww.Lumin.init === 'function') {
-          recordAttempt(existingSrc, true, null);
+          recordAttempt(existingSrc, 'tag', true, null);
           start();
         } else {
           recordAttempt(
             existingSrc,
+            'tag',
             false,
             null,
             new TypeError(`script loaded but Lumin global missing after load (src=${existingSrc})`)
@@ -1052,6 +1154,7 @@ function initHomepageTest(): void {
       () => {
         recordAttempt(
           existingSrc,
+          'tag',
           false,
           null,
           new TypeError(`lumin.min.js script tag failed to load (src=${existingSrc})`)
