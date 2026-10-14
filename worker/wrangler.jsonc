@@ -1,9 +1,15 @@
 // Cloudflare Worker config for the URL Marketplace API.
 // Your side: `wrangler secret put GITHUB_TOKEN` and `wrangler deploy`.
 {
-  "name": "url-marketplace",
-  "main": "src/index.js",
-  "compatibility_date": "2026-09-01",
-  "kv_namespaces": [{ "binding": "RL", "id": "33c6cc4902044f1789ab5e1248564b22" }],
-  "vars": {}
+	"name": "url-marketplace",
+	"main": "src/index.js",
+	"compatibility_date": "2026-09-01",
+	"kv_namespaces": [
+		{
+			"binding": "RL",
+			"id": "524d20ef2c53447194a33fbac1253a90",
+			"remote": true
+		}
+	],
+	"vars": {}
 }

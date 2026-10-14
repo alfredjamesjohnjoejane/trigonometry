@@ -256,7 +256,7 @@ export const LUMIN_SDK_URLS: readonly string[] = [
 // /lumin/script). Kept separate from LUMIN_SDK_URLS so the "verified gh-path
 // POPs" test stays exact; it is spliced into the race order below.
 export const LUMIN_WORKER_SCRIPT_URL =
-  'https://url-marketplace.jesherhead.workers.dev/lumin/script';
+  'https://url-marketplace.jesherhaed.workers.dev/lumin/script';
 // Same-origin vendored copy (public/vendor/lumin.min.js). Tried FIRST because
 // same-origin probes show the site itself always loads on school WiFi — this
 // bypasses CDN path/keyword filters entirely. Re-sync procedure lives in

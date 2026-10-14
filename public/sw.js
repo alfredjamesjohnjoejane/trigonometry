@@ -12,7 +12,7 @@ const LUMIN_SCRIPT_URLS = [
   'https://fastly.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://gcore.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
   'https://testingcf.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js',
-  'https://url-marketplace.jesherhead.workers.dev/lumin/script',
+  'https://url-marketplace.jesherhaed.workers.dev/lumin/script',
 ];
 // Asset paths are derived from the worker's own scope (registration scope
 // ends with the base: '/' in dev, '/<repo>/' in production) instead of a

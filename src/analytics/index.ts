@@ -7,7 +7,7 @@ export const POSTHOG_KEY: string = 'phc_osP2cJgkWEZ2FWpPD5NXM6rB2h5XNDrxgVwJqgB8
 // requests never touch adblock-listed *.i.posthog.com. Replace with your
 // deployed worker origin (Cloudflare Dashboard > Workers, or
 // `npx wrangler deployments` inside worker/), keeping the trailing /ph.
-export const POSTHOG_WORKER_ORIGIN = 'https://url-marketplace.jesherhead.workers.dev';
+export const POSTHOG_WORKER_ORIGIN = 'https://url-marketplace.jesherhaed.workers.dev';
 export const POSTHOG_HOST = POSTHOG_WORKER_ORIGIN + '/ph';
 
 let started = false;

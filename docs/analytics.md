@@ -10,7 +10,7 @@ Analytics uses PostHog, a product analytics platform. The PostHog JS SDK is the 
 
 ```ts
 export const POSTHOG_KEY = 'phc_osP2cJgkWEZ2FWpPD5NXM6rB2h5XNDrxgVwJqgB8YCoG';
-export const POSTHOG_WORKER_ORIGIN = 'https://url-marketplace.jesherhead.workers.dev';
+export const POSTHOG_WORKER_ORIGIN = 'https://url-marketplace.jesherhaed.workers.dev';
 export const POSTHOG_HOST = POSTHOG_WORKER_ORIGIN + '/ph';
 ```
 
