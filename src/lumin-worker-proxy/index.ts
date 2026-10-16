@@ -1,6 +1,8 @@
 import { LUMIN_WORKER_FILE_TARGETS, LUMIN_WORKER_PROXY_URL } from '../types/index.js';
 
 const INSTALLED_FLAG = '__luminWorkerProxyInstalled';
+const ORIG_WORKER_KEY = '__luminWorkerProxyOrigWorker';
+const WORKER_WRAPPED_FLAG = '__luminWorkerProxyWorkerWrapped';
 
 function workerHostnames(): Set<string> {
   const hosts = new Set<string>();
@@ -68,6 +70,13 @@ function extractUrl(input: RequestInfo | URL): string | null {
  * upstreams server-side), falling back to the direct URL if the proxy itself
  * is unreachable. Idempotent. Must run before any Lumin.init call, alongside
  * installLuminBootProxy.
+ *
+ * Covers three creation paths: window.fetch, XMLHttpRequest, and
+ * `new Worker(url)`. The Worker patch matters because a direct
+ * `new Worker('https://a.luminsdk.com/v1/lumin.worker.js')` bypasses fetch
+ * patching entirely — its network load fails on filtered school WiFi with
+ * "Worker connection failed: domain fetch failed" even while fetch probes
+ * to the same host pass.
  */
 export function installLuminWorkerProxy(): boolean {
   try {
@@ -97,6 +106,7 @@ export function installLuminWorkerProxy(): boolean {
     w[INSTALLED_FLAG] = true;
     (w.__luminWorkerProxyOrigFetch as unknown) = origFetch;
     window.fetch = patchedFetch as typeof window.fetch;
+    installWorkerConstructorPatch();
     try {
       const XHR = window.XMLHttpRequest;
       if (typeof XHR !== 'undefined' && XHR.prototype?.open) {
@@ -126,6 +136,38 @@ export function installLuminWorkerProxy(): boolean {
   }
 }
 
+/** Rewrite direct `new Worker(luminUrl)` loads to the proxy (see above). */
+function installWorkerConstructorPatch(): void {
+  try {
+    const w = window as unknown as Record<string, unknown> & {
+      Worker?: new (url: string | URL, opts?: WorkerOptions) => Worker;
+    };
+    const Orig = w.Worker;
+    if (typeof Orig !== 'function') return;
+    if ((Orig as unknown as Record<string, unknown>)[WORKER_WRAPPED_FLAG] === true) return;
+    const Wrapped = function (this: unknown, url: string | URL, opts?: WorkerOptions): Worker {
+      let out: string | URL = url;
+      try {
+        const raw = typeof url === 'string' ? url : url instanceof URL ? url.href : String(url);
+        if (isLuminWorkerUrl(raw)) out = toWorkerFileUrl(raw);
+      } catch {
+        /* keep original */
+      }
+      return new Orig(out, opts);
+    } as unknown as typeof Worker;
+    try {
+      Wrapped.prototype = Orig.prototype;
+      Object.defineProperty(Wrapped, WORKER_WRAPPED_FLAG, { value: true });
+    } catch {
+      /* best-effort */
+    }
+    w[ORIG_WORKER_KEY] = Orig;
+    w.Worker = Wrapped;
+  } catch {
+    /* Worker patch is best-effort */
+  }
+}
+
 /** @internal - restore originals for tests */
 export function _uninstallLuminWorkerProxy(): void {
   try {
@@ -134,6 +176,20 @@ export function _uninstallLuminWorkerProxy(): void {
     if (orig) window.fetch = orig;
     delete w[INSTALLED_FLAG];
     delete w.__luminWorkerProxyOrigFetch;
+    const origWorker = w[ORIG_WORKER_KEY] as typeof window.Worker | undefined;
+    if (origWorker) {
+      window.Worker = origWorker;
+    } else {
+      try {
+        const cur = window.Worker as unknown as Record<string, unknown> | undefined;
+        if (cur && cur[WORKER_WRAPPED_FLAG] === true) {
+          delete (window as unknown as Record<string, unknown>).Worker;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    delete w[ORIG_WORKER_KEY];
   } catch {
     /* ignore */
   }

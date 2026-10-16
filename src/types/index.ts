@@ -106,7 +106,11 @@ export const GRADIENTS = [
 ];
 
 export const CDN_TARGETS: CDNTarget[] = [
-  { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/favicon.ico' },
+  // NOTE: this must be a CORS-enabled file (sends ACAO:*). The old
+  // /favicon.ico target sends no ACAO header, so its fetch-cors probe failed
+  // on every network — including healthy ones — and every report grew a
+  // bogus "school filter blocks jsDelivr" row.
+  { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js' },
   { name: 'Lumin SDK', url: 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js' },
   {
     name: 'Lumin SDK (fastly)',

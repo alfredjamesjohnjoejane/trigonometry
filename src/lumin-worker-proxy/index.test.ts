@@ -100,3 +100,49 @@ describe('installLuminWorkerProxy', () => {
     expect(calls).toEqual(['https://a.luminsdk.com/api/v1/boot?t=1']);
   });
 });
+
+describe('installLuminWorkerProxy Worker patch', () => {
+  class FakeWorker {
+    url: string;
+    opts?: WorkerOptions;
+    constructor(url: string | URL, opts?: WorkerOptions) {
+      this.url = String(url);
+      this.opts = opts;
+    }
+  }
+
+  it('rewrites direct new Worker(luminUrl) loads to the proxy', () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    installLuminWorkerProxy();
+    const w = new window.Worker('https://a.luminsdk.com/v1/lumin.worker.js');
+    expect((w as unknown as FakeWorker).url).toBe(LUMIN_WORKER_PROXY_URL);
+  });
+
+  it('preserves query strings and passes options through', () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    installLuminWorkerProxy();
+    const w = new window.Worker('https://drkesten.com/v1/lumin.worker.js?v=2', {
+      name: 'lumin',
+    });
+    const f = w as unknown as FakeWorker;
+    expect(f.url).toBe(`${LUMIN_WORKER_PROXY_URL}?v=2`);
+    expect(f.opts).toEqual({ name: 'lumin' });
+  });
+
+  it('leaves non-Lumin Worker URLs untouched', () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    installLuminWorkerProxy();
+    const w = new window.Worker('https://example.com/app.worker.js');
+    expect((w as unknown as FakeWorker).url).toBe('https://example.com/app.worker.js');
+  });
+
+  it('is idempotent and uninstall restores the original Worker', () => {
+    vi.stubGlobal('Worker', FakeWorker);
+    installLuminWorkerProxy();
+    installLuminWorkerProxy();
+    const w = new window.Worker('https://milpagan.org/v1/lumin.worker.js');
+    expect((w as unknown as FakeWorker).url).toBe(LUMIN_WORKER_PROXY_URL);
+    _uninstallLuminWorkerProxy();
+    expect(window.Worker).toBe(FakeWorker);
+  });
+});

@@ -26,6 +26,30 @@ const LUMIN_WORKER_URLS = [
   'https://catholicrebuttals.com/v1/lumin.worker.js',
   'https://instructure-ramen.hpsschools.org/v1/lumin.worker.js',
 ];
+// Lumin URLs are matched by origin+pathname, IGNORING query strings: the SDK
+// stub appends runtime tokens (e.g. /api/v1/boot?t=...) and worker-file
+// fetches may carry cache-busters. Exact-href matching let those variants
+// bypass the stale-while-revalidate cache and hit the school filter direct,
+// failing Lumin.init with "domain fetch failed" while the bare-URL
+// diagnostics probes still passed. Returns the normalized cache key
+// (origin+pathname) or null when the URL is not a known Lumin file.
+function luminCacheKeyFor(href) {
+  let u;
+  try {
+    u = new URL(href);
+  } catch (err) {
+    return null;
+  }
+  const key = u.origin + u.pathname;
+  const lists = [...LUMIN_SCRIPT_URLS, ...LUMIN_WORKER_URLS];
+  for (const cand of lists) {
+    try {
+      const c = new URL(cand);
+      if (c.origin === u.origin && c.pathname === u.pathname) return key;
+    } catch (err) {}
+  }
+  return null;
+}
 // Asset paths are derived from the worker's own scope (registration scope
 // ends with the base: '/' in dev, '/<repo>/' in production) instead of a
 // hardcoded prefix, so the precache list works in every environment.
@@ -195,9 +219,11 @@ self.addEventListener('fetch', (event) => {
   // deploys; a fast stale response also beats throttled school WiFi while a
   // background revalidate refreshes the entry. Covers both lumin.min.js and
   // the /v1/lumin.worker.js files Lumin.init fetches before creating its
-  // Worker.
-  if (LUMIN_SCRIPT_URLS.some((u) => u === url.href) || LUMIN_WORKER_URLS.some((u) => u === url.href)) {
-    event.respondWith(luminStaleWhileRevalidate(request));
+  // Worker. Matched by origin+pathname so runtime query tokens (?t=, cache
+  // busters) hit the same cache entry instead of bypassing to the filter.
+  const luminKey = luminCacheKeyFor(url.href);
+  if (luminKey) {
+    event.respondWith(luminStaleWhileRevalidate(request, luminKey));
     return;
   }
 
@@ -238,9 +264,10 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(networkFirstWithOfflineFallback(request));
 });
 
-async function luminStaleWhileRevalidate(request) {
+async function luminStaleWhileRevalidate(request, cacheKey) {
   const cache = await caches.open(LUMIN_CACHE_NAME);
-  const cached = await cache.match(request);
+  const key = cacheKey || request;
+  const cached = await cache.match(key);
   const cachedTime = (() => {
     try {
       const h = cached && cached.headers.get('sw-cache-date');
@@ -263,7 +290,7 @@ async function luminStaleWhileRevalidate(request) {
           headers: new Headers(response.headers),
         });
         toCache.headers.set('sw-cache-date', Date.now().toString());
-        await cache.put(request, toCache).catch(() => {});
+        await cache.put(key, toCache).catch(() => {});
       }
     } catch (err) {}
   })();
@@ -273,7 +300,7 @@ async function luminStaleWhileRevalidate(request) {
     return cached;
   }
   try {
-    const response = await revalidate.then(() => cache.match(request));
+    const response = await revalidate.then(() => cache.match(key));
     if (response) return response;
   } catch (err) {}
   // Total miss or expired with network down: serve stale if we have it so a

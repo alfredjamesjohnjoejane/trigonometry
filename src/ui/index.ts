@@ -889,6 +889,30 @@ function initHomepageTest(): void {
     }
     mount.appendChild(div);
   };
+  // Route the stub's boot + worker-file fetches through the worker proxy
+  // (direct fallback on proxy failure). Installed once per page; must precede
+  // any Lumin.init — including the already-present fast path below, which
+  // otherwise skips the race that used to install them. The worker-file
+  // patch matters on school WiFi: after the boot JSON loads, Lumin.init
+  // fetches /v1/lumin.worker.js from each boot host, and that path can be
+  // filtered while /api/v1/boot stays reachable
+  // ("Worker connection failed: domain fetch failed").
+  try {
+    installLuminBootProxy();
+    installLuminWorkerProxy();
+  } catch {
+    /* diagnostics must never break loading */
+  }
+  // Mirror attempts live above start() so an init failure after a mirror win
+  // still reports what loaded (the old fail(e) dropped them: mirrorsTried 0).
+  const mirrorUrls = luminScriptUrls();
+  const mirrorAttempts: LuminMirrorAttempt[] = [];
+  try {
+    (window as unknown as Record<string, unknown>).__luminMirrorAttempts = mirrorAttempts;
+    (window as unknown as Record<string, unknown>).__luminMirrorUrls = [...mirrorUrls];
+  } catch {
+    /* ignore */
+  }
   const start = () => {
     // Lumin.init returns a promise that rejects when the SDK boot fails
     // (e.g. its fetched-code Function() evaluation is blocked). Catch async
@@ -900,7 +924,7 @@ function initHomepageTest(): void {
       if (settled) return;
       settled = true;
       clearTimeout(hangTimer);
-      fail(e);
+      fail(e, mirrorAttempts);
     };
     const hangTimer = setTimeout(
       () => failOnce(new DOMException('Lumin.init timed out after 20s', 'AbortError')),
@@ -937,14 +961,8 @@ function initHomepageTest(): void {
   // STAGGER ms after the previous so the fastest healthy source wins without
   // flooding throttled school WiFi. First mirror to expose Lumin.init wins;
   // losers are removed. Per-mirror tag -> fetch-blob tiers preserved.
-  const mirrorUrls = luminScriptUrls();
-  const mirrorAttempts: LuminMirrorAttempt[] = [];
-  try {
-    (window as unknown as Record<string, unknown>).__luminMirrorAttempts = mirrorAttempts;
-    (window as unknown as Record<string, unknown>).__luminMirrorUrls = [...mirrorUrls];
-  } catch {
-    /* ignore */
-  }
+  // (mirrorUrls/mirrorAttempts are declared above start() so init failures
+  // keep the per-mirror breakdown.)
   const SCRIPT_TIMEOUT_MS = LUMIN_SCRIPT_TAG_TIMEOUT_MS;
   const FETCH_BLOB_TIMEOUT_MS = LUMIN_FETCH_BLOB_TIMEOUT_MS;
   const nowMs = (): number => {
@@ -1257,18 +1275,8 @@ function initHomepageTest(): void {
     start();
     return;
   }
-  // Route the stub's boot + worker-file fetches through the worker proxy
-  // (direct fallback on proxy failure). Installed once per page; must precede
-  // any Lumin.init. The worker-file patch matters on school WiFi: after the
-  // boot JSON loads, Lumin.init fetches /v1/lumin.worker.js from each boot
-  // host, and that path can be filtered while /api/v1/boot stays reachable
-  // ("Worker connection failed: domain fetch failed").
-  try {
-    installLuminBootProxy();
-    installLuminWorkerProxy();
-  } catch {
-    /* diagnostics must never break loading */
-  }
+  // (boot + worker fetch/XHR/Worker patches are installed above, before
+  // the already-present fast path, so they always precede any Lumin.init.)
   // Staggered start: IDB tier + vendor fire immediately, worker proxy ~1.2s,
   // POPs after. Early winner cancels the rest via winRace cleanup.
   tryIdbTier();

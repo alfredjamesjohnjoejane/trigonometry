@@ -104,7 +104,7 @@ Pings CDN targets concurrently:
 
 ```ts
 const CDN_TARGETS = [
-  { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/favicon.ico' },
+  { name: 'jsDelivr', url: 'https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js' },
   { name: 'Lumin SDK', url: 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js' },
   // + fastly/gcore/testingcf POP mirrors (see src/types/index.ts).
   // Backend boot hosts live separately in LUMIN_BACKEND_TARGETS and worker

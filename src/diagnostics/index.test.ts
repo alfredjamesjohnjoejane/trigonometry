@@ -218,6 +218,38 @@ describe('guessLikelyCause', () => {
     expect(cause).toMatch(/LUMIN-WORKER-BLOCKED/);
   });
 
+  it('prefers LUMIN-INIT over PARTIAL-MIRROR-BLOCK when init ran and failed', () => {
+    // Shape of the 2026-10-15 school report: vendor copy loaded + executed
+    // (present-with-init) but Lumin.init rejected with "domain fetch failed"
+    // while backends/workers all passed. The old ordering blamed the mirror
+    // split even though the script demonstrably executed.
+    const cause = guessLikelyCause(
+      [
+        probe('same-origin: catalog', true),
+        probe('cdn: Lumin SDK', false),
+        probe('cdn: Lumin SDK (fastly)', false),
+        probe('cdn: Lumin SDK (gcore)', false),
+        probe('cdn: Lumin SDK (testingcf)', false),
+        probe('cdn: Lumin SDK (worker proxy)', true),
+        probe('backend: Lumin backend (worker proxy)', true),
+        probe('backend: Lumin backend (primary)', true),
+        probe('worker: Lumin worker (proxy)', true),
+        probe('worker: Lumin worker (primary)', true),
+      ],
+      {
+        attempted: true,
+        present: true,
+        initType: 'function',
+        ok: false,
+        errorName: 'Error',
+        errorMessage: 'Error: domain fetch failed',
+        ms: 1,
+      }
+    );
+    expect(cause).toMatch(/LUMIN-INIT failed/);
+    expect(cause).not.toMatch(/PARTIAL-MIRROR-BLOCK/);
+  });
+
   it('does not cry backend-blocked when a no-cors row shows the host alive', () => {
     const cause = guessLikelyCause(
       [

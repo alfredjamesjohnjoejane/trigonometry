@@ -656,10 +656,6 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
     return 'OFFLINE-or-captive-portal: this site itself is unreachable. Join WiFi / complete the login page, then retry.';
   if (sameOriginOk && !cdnOk && !anyNoCorsOk)
     return 'SCHOOL-FILTER blocking cdn.jsdelivr.net: site loads but the game CDN is unreachable. Allowlist cdn.jsdelivr.net (and Lumin hosts) or use another network.';
-  if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
-    return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
-  if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
-    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — CDN fallback cannot help. The same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store should cover this; if none did, the vendor file is stale and the IDB store is empty.';
   if (
     sameOriginOk &&
     backendProbes.length > 0 &&
@@ -673,10 +669,20 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
   const workerAnyOk = probes.some(p => p.name.startsWith('worker:') && p.ok);
   if (sameOriginOk && workerProbes.length > 0 && !workerAnyOk && lumin.present && backendAnyOk)
     return 'LUMIN-WORKER-BLOCKED: the script and backend boot hosts load, but ALL /v1/lumin.worker.js file fetches fail, including the worker proxy. Lumin.init fetches the worker file before creating its Worker ("Worker connection failed: domain fetch failed"). Worker fetches are routed via the /lumin/worker proxy with direct fallback — if the proxy row also fails, the proxy host itself is filtered. Allowlist the worker origin, or use another network.';
+  // A rejected Lumin.init is a more specific signal than a mirror split, so it
+  // outranks the mirror branches below: the script demonstrably loaded and
+  // executed (e.g. via the same-origin vendor copy, which is not a probed
+  // mirror), and init still failed — usually the "domain fetch failed" worker
+  // fetch. Check the worker-file rows: Lumin.init fetches /v1/lumin.worker.js
+  // before creating its Worker.
+  if (lumin.present && lumin.attempted && !lumin.ok)
+    return `LUMIN-INIT failed (${lumin.errorName ?? 'unknown'}): script loaded but init rejected. Likely Lumin backend or worker-file fetch blocked, or Function()-eval blocked. Check the worker-file rows below. Error: ${(lumin.errorMessage ?? '').slice(0, 160)}`;
+  if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
+    return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
+  if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
+    return 'FILTER-ON-LUMIN-PATH: jsDelivr host reachable but ALL Lumin mirrors fail. The filter is blocking the /gh/luminsdk/script path (or the `luminsdk` keyword) on every POP — CDN fallback cannot help. The same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store should cover this; if none did, the vendor file is stale and the IDB store is empty.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && !lumin.present)
     return 'SDK script blocked: CDN reachable but lumin.min.js did not execute. Suspect CSP/adblock/filter stripping the script — check the lumin-script probe and console.';
-  if (lumin.present && lumin.attempted && !lumin.ok)
-    return `LUMIN-INIT failed (${lumin.errorName ?? 'unknown'}): script loaded but init rejected. Likely Lumin backend blocked or Function()-eval blocked. Error: ${(lumin.errorMessage ?? '').slice(0, 160)}`;
   if (anyTimeout || slow)
     return 'SLOW-or-throttled WiFi: probes pass but time out / take seconds. Retry on a faster network or wait and press Retry.';
   if (sameOriginOk && (cdnOk || anyNoCorsOk) && lumin.ok)
