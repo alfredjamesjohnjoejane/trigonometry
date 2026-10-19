@@ -780,14 +780,19 @@ async function proxyLuminWorker() {
   );
 }
 
-// ANY /lumin/boot[?t=...] -> first healthy LUMIN_BOOT_UPSTREAMS host.
-// The stub appends ?t= at runtime; pass method/query/body through untouched
-// and rotate upstreams so one filtered host does not fail the request.
+// ANY /lumin/boot[/...][?t=...] -> first healthy LUMIN_BOOT_UPSTREAMS host.
+// The client preserves the original path (e.g. /lumin/boot/api/v1/boot?t=),
+// so strip the /lumin/boot prefix before forwarding to the upstream, which
+// expects its own path (e.g. /api/v1/boot?t=). The stub appends ?t= at
+// runtime; pass method/query/body through untouched and rotate upstreams so
+// one filtered host does not fail the request.
 async function proxyLuminBoot(request, url) {
   const query = url.search || '';
   const method = request.method.toUpperCase();
   const body =
     method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer().catch(() => undefined);
+  // Strip the /lumin/boot proxy prefix so the upstream sees its real path.
+  const path = url.pathname.replace(/^\/lumin\/boot\/?/, '/') || '/';
   let lastStatus = 502;
   for (const upstream of LUMIN_BOOT_UPSTREAMS) {
     try {
@@ -798,7 +803,7 @@ async function proxyLuminBoot(request, url) {
         const fwdHeaders = new Headers(request.headers);
         fwdHeaders.delete('host');
         fwdHeaders.delete('content-length');
-        res = await fetch(upstream + query, {
+        res = await fetch(upstream + path + query, {
           method,
           headers: fwdHeaders,
           body,

@@ -18,9 +18,10 @@ afterEach(() => {
 });
 
 describe('isLuminBootUrl', () => {
-  it('matches direct boot hosts with the boot path', () => {
+  it('matches direct boot hosts on any path', () => {
     expect(isLuminBootUrl('https://a.luminsdk.com/api/v1/boot?t=abc')).toBe(true);
     expect(isLuminBootUrl('https://drkesten.com/api/v1/boot')).toBe(true);
+    expect(isLuminBootUrl('https://a.luminsdk.com/some-config?t=x')).toBe(true);
   });
 
   it('ignores the worker proxy itself and unrelated URLs', () => {
@@ -34,9 +35,15 @@ describe('isLuminBootUrl', () => {
 });
 
 describe('toWorkerBootUrl', () => {
-  it('preserves the boot token query', () => {
+  it('preserves the boot path and token query', () => {
     expect(toWorkerBootUrl('https://a.luminsdk.com/api/v1/boot?t=xyz')).toBe(
-      `${LUMIN_WORKER_BOOT_URL}?t=xyz`
+      `${LUMIN_WORKER_BOOT_URL}/api/v1/boot?t=xyz`
+    );
+  });
+
+  it('preserves other paths on boot hosts', () => {
+    expect(toWorkerBootUrl('https://drkesten.com/some-config?t=1')).toBe(
+      `${LUMIN_WORKER_BOOT_URL}/some-config?t=1`
     );
   });
 });
@@ -50,7 +57,7 @@ describe('installLuminBootProxy', () => {
     });
     expect(installLuminBootProxy()).toBe(true);
     await window.fetch('https://a.luminsdk.com/api/v1/boot?t=1');
-    expect(calls[0]).toBe(`${LUMIN_WORKER_BOOT_URL}?t=1`);
+    expect(calls[0]).toBe(`${LUMIN_WORKER_BOOT_URL}/api/v1/boot?t=1`);
     expect(installLuminBootProxy()).toBe(true);
   });
 
@@ -66,9 +73,20 @@ describe('installLuminBootProxy', () => {
     const res = await window.fetch('https://a.luminsdk.com/api/v1/boot?t=2');
     expect(res.status).toBe(200);
     expect(calls).toEqual([
-      `${LUMIN_WORKER_BOOT_URL}?t=2`,
+      `${LUMIN_WORKER_BOOT_URL}/api/v1/boot?t=2`,
       'https://a.luminsdk.com/api/v1/boot?t=2',
     ]);
+  });
+
+  it('proxies non-boot paths on boot hosts too', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (input: unknown) => {
+      calls.push(String(input));
+      return new Response('{}', { status: 200 });
+    });
+    installLuminBootProxy();
+    await window.fetch('https://a.luminsdk.com/some-config?t=x');
+    expect(calls[0]).toBe(`${LUMIN_WORKER_BOOT_URL}/some-config?t=x`);
   });
 
   it('leaves non-boot fetches untouched', async () => {

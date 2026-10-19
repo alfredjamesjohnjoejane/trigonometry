@@ -22,7 +22,11 @@ function workerHostname(): string | null {
   }
 }
 
-/** True for direct SDK boot fetches (known boot host + /api/v1/boot path). */
+/** True for direct SDK fetches to any Lumin boot hostname, any path. The VM
+ * the SDK runs after boot can request other paths on these hosts (not just
+ * /api/v1/boot), and school filters that silently drop those requests leave
+ * Lumin.init hanging forever. Proxying every path on these hostnames keeps
+ * every Lumin request on the resilient route. */
 export function isLuminBootUrl(raw: string): boolean {
   if (typeof raw !== 'string' || !raw) return false;
   try {
@@ -31,7 +35,6 @@ export function isLuminBootUrl(raw: string): boolean {
         ? window.location.origin
         : 'http://localhost/';
     const u = new URL(raw, base);
-    if (!u.pathname.includes('/api/v1/boot')) return false;
     const worker = workerHostname();
     if (worker && u.hostname.toLowerCase() === worker) return false;
     return bootHostnames().has(u.hostname.toLowerCase());
@@ -40,10 +43,10 @@ export function isLuminBootUrl(raw: string): boolean {
   }
 }
 
-/** Rewrite a direct boot URL to the worker proxy, preserving the query (?t=). */
+/** Rewrite a direct boot URL to the worker proxy, preserving path + query. */
 export function toWorkerBootUrl(raw: string): string {
   const u = new URL(raw);
-  return LUMIN_WORKER_BOOT_URL + (u.search || '');
+  return LUMIN_WORKER_BOOT_URL + u.pathname + (u.search || '');
 }
 
 function extractUrl(input: RequestInfo | URL): string | null {
