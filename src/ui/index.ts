@@ -731,6 +731,7 @@ function initHomepageTest(): void {
           errorName: errName || null,
           errorMessage: combinedErrText.slice(0, 800) || null,
           ms: null,
+          luminFetchUrls: [],
         },
         recentLogs: mirrorAttempts.length
           ? mirrorAttempts.map(

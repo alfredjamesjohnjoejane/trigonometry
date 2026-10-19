@@ -67,6 +67,8 @@ export interface LuminAttempt {
   errorName: string | null;
   errorMessage: string | null;
   ms: number | null;
+  /** URLs the SDK tried to fetch during init (captured by patching fetch). */
+  luminFetchUrls: string[];
 }
 
 export interface DiagReport {
@@ -571,6 +573,7 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
     errorName: null,
     errorMessage: null,
     ms: null,
+    luminFetchUrls: [],
   };
   try {
     console.log(
@@ -592,7 +595,22 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
   out.attempted = true;
   const start = now();
   const sandbox = document.createElement('div');
+  // Capture every URL the SDK fetches during init so we can tell exactly
+  // what is blocked on school WiFi (the SDK is obfuscated and fetches
+  // dynamically constructed URLs that static probes cannot see).
+  const fetchUrls: string[] = [];
+  const origFetch = window.fetch.bind(window);
   try {
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      try {
+        const u =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : String(input);
+        if (u) fetchUrls.push(u);
+      } catch {
+        /* ignore */
+      }
+      return origFetch(input, init);
+    };
     const r = (w.Lumin as { init: (o: unknown) => unknown }).init({
       container: sandbox,
       theme: 'dark',
@@ -616,6 +634,20 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
     try {
       console.log(
         `[Diag] lumin.init FAIL ${out.ms}ms ${out.errorName}: ${(out.errorMessage ?? '').slice(0, 160)}`
+      );
+    } catch {
+      /* ignore */
+    }
+  } finally {
+    try {
+      window.fetch = origFetch;
+    } catch {
+      /* ignore */
+    }
+    out.luminFetchUrls = fetchUrls;
+    try {
+      console.log(
+        `[Diag] lumin.fetch urls: ${fetchUrls.length} ${fetchUrls.slice(0, 10).join(' ')}`
       );
     } catch {
       /* ignore */
@@ -771,6 +803,7 @@ export async function runFullDiagnostics(timeout = 8000): Promise<DiagReport> {
       errorName: 'ProbeError',
       errorMessage: describeError('lumin probe crashed').slice(0, 300),
       ms: null,
+      luminFetchUrls: [],
     })
   );
   try {
@@ -853,6 +886,11 @@ export function formatReportText(r: DiagReport): string {
     for (const p of workerRows) {
       lines.push(`${p.ok ? 'PASS' : 'FAIL'} ${p.ms ?? '?'}ms ${p.method} ${p.name}`);
     }
+    lines.push('');
+  }
+  if (r.lumin.luminFetchUrls && r.lumin.luminFetchUrls.length) {
+    lines.push('--- lumin.init fetch urls ---');
+    for (const u of r.lumin.luminFetchUrls) lines.push(`fetch: ${u}`);
     lines.push('');
   }
   lines.push('--- probes ---');

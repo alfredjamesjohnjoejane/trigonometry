@@ -41,6 +41,7 @@ function baseReport(): DiagReport {
       errorName: null,
       errorMessage: null,
       ms: null,
+      luminFetchUrls: [],
     },
     recentLogs: [],
     likelyCause: 'test',
@@ -96,6 +97,7 @@ describe('guessLikelyCause', () => {
         errorName: null,
         errorMessage: null,
         ms: null,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/OFFLINE-or-captive-portal/);
@@ -112,6 +114,7 @@ describe('guessLikelyCause', () => {
         errorName: null,
         errorMessage: null,
         ms: null,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/SCHOOL-FILTER/);
@@ -128,6 +131,7 @@ describe('guessLikelyCause', () => {
         errorName: 'Error',
         errorMessage: 'backend blocked',
         ms: 300,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/LUMIN-INIT failed/);
@@ -148,6 +152,7 @@ describe('guessLikelyCause', () => {
         errorName: null,
         errorMessage: null,
         ms: null,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/PARTIAL-MIRROR-BLOCK/);
@@ -169,6 +174,7 @@ describe('guessLikelyCause', () => {
         errorName: null,
         errorMessage: null,
         ms: null,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/FILTER-ON-LUMIN-PATH/);
@@ -190,6 +196,7 @@ describe('guessLikelyCause', () => {
         errorName: 'Error',
         errorMessage: 'boot',
         ms: 5000,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/LUMIN-BACKEND-BLOCKED/);
@@ -213,6 +220,7 @@ describe('guessLikelyCause', () => {
         errorName: 'Error',
         errorMessage: 'domain fetch failed',
         ms: 5000,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/LUMIN-WORKER-BLOCKED/);
@@ -244,6 +252,7 @@ describe('guessLikelyCause', () => {
         errorName: 'Error',
         errorMessage: 'Error: domain fetch failed',
         ms: 1,
+        luminFetchUrls: [],
       }
     );
     expect(cause).toMatch(/LUMIN-INIT failed/);
@@ -266,6 +275,7 @@ describe('guessLikelyCause', () => {
         errorName: 'Error',
         errorMessage: 'boot',
         ms: 5000,
+        luminFetchUrls: [],
       }
     );
     expect(cause).not.toMatch(/LUMIN-BACKEND-BLOCKED/);
