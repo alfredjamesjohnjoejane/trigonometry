@@ -1,20 +1,8 @@
-import { LUMIN_WORKER_FILE_TARGETS, LUMIN_WORKER_PROXY_URL } from '../types/index.js';
+import { LUMIN_WORKER_PROXY_URL } from '../types/index.js';
 
 const INSTALLED_FLAG = '__luminWorkerProxyInstalled';
 const ORIG_WORKER_KEY = '__luminWorkerProxyOrigWorker';
 const WORKER_WRAPPED_FLAG = '__luminWorkerProxyWorkerWrapped';
-
-function workerHostnames(): Set<string> {
-  const hosts = new Set<string>();
-  for (const t of LUMIN_WORKER_FILE_TARGETS) {
-    try {
-      hosts.add(new URL(t.url).hostname.toLowerCase());
-    } catch {
-      /* ignore */
-    }
-  }
-  return hosts;
-}
 
 function proxyHostname(): string | null {
   try {
@@ -42,7 +30,18 @@ export function isLuminWorkerUrl(raw: string): boolean {
     if (!u.pathname.includes('/v1/lumin.worker.js')) return false;
     const proxy = proxyHostname();
     if (proxy && u.hostname.toLowerCase() === proxy) return false;
-    return workerHostnames().has(u.hostname.toLowerCase());
+    // Match any cross-origin /v1/lumin.worker.js URL, not just known hosts.
+    // Lumin.init decodes worker URLs from the boot response at runtime and may
+    // fetch them from hosts not in LUMIN_WORKER_FILE_TARGETS. School filters
+    // that block those unlisted hosts cause "Worker connection failed: domain
+    // fetch failed" even while fetch probes to known hosts pass. Routing every
+    // cross-origin worker fetch through the proxy keeps all worker traffic on
+    // the resilient route. Same-origin URLs are left alone (they're not subject
+    // to domain-based school filtering).
+    const pageHost = typeof window !== 'undefined' && window.location?.hostname
+      ? window.location.hostname.toLowerCase()
+      : '';
+    return u.hostname.toLowerCase() !== pageHost;
   } catch {
     return false;
   }

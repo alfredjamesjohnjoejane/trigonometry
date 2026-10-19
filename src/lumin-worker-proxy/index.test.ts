@@ -26,6 +26,16 @@ describe('isLuminWorkerUrl', () => {
     );
   });
 
+  it('matches worker fetches on unknown hosts (discovered at runtime)', () => {
+    // Lumin.init decodes worker URLs from the boot response; any cross-origin
+    // /v1/lumin.worker.js URL must be routed through the proxy, even if the
+    // host is not in LUMIN_WORKER_FILE_TARGETS.
+    expect(isLuminWorkerUrl('https://unknown-lumin-host.example.com/v1/lumin.worker.js')).toBe(
+      true
+    );
+    expect(isLuminWorkerUrl('https://192.0.2.1/v1/lumin.worker.js')).toBe(true);
+  });
+
   it('ignores the worker proxy itself and unrelated URLs', () => {
     expect(isLuminWorkerUrl(LUMIN_WORKER_PROXY_URL)).toBe(false);
     expect(isLuminWorkerUrl('https://a.luminsdk.com/api/v1/boot?t=abc')).toBe(false);
@@ -34,6 +44,14 @@ describe('isLuminWorkerUrl', () => {
     ).toBe(false);
     expect(isLuminWorkerUrl('https://example.com/other')).toBe(false);
     expect(isLuminWorkerUrl('')).toBe(false);
+  });
+
+  it('leaves same-origin worker URLs untouched', () => {
+    const pageHost = window.location.hostname.toLowerCase();
+    expect(
+      isLuminWorkerUrl(`https://${pageHost}/v1/lumin.worker.js`)
+    ).toBe(false);
+    expect(isLuminWorkerUrl('/v1/lumin.worker.js')).toBe(false);
   });
 });
 
