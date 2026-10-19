@@ -903,7 +903,7 @@ function initHomepageTest(): void {
   } catch {
     /* diagnostics must never break loading */
   }
-  // Mirror attempts live above start() so an init failure after a mirror win
+  // Mirror attempts live above the race so an init failure after a mirror win
   // still reports what loaded (the old fail(e) dropped them: mirrorsTried 0).
   const mirrorUrls = luminScriptUrls();
   const mirrorAttempts: LuminMirrorAttempt[] = [];
@@ -913,39 +913,52 @@ function initHomepageTest(): void {
   } catch {
     /* ignore */
   }
-  const start = () => {
-    // Lumin.init returns a promise that rejects when the SDK boot fails
-    // (e.g. its fetched-code Function() evaluation is blocked). Catch async
-    // rejections too — try/catch alone left a silent empty mount.
-    // A hang guard catches the school-WiFi case where init neither resolves
-    // nor rejects (backend request swallowed by the filter).
-    let settled = false;
-    const failOnce = (e?: unknown) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(hangTimer);
-      fail(e, mirrorAttempts);
-    };
-    const hangTimer = setTimeout(
-      () => failOnce(new DOMException('Lumin.init timed out after 20s', 'AbortError')),
-      20000
-    );
-    try {
-      const r = (window as unknown as { Lumin?: { init: (o: unknown) => unknown } }).Lumin?.init({
-        container: mount,
-        theme: 'dark',
-      });
-      Promise.resolve(r).then(
-        () => {
+  // Call Lumin.init() with a short per-mirror timeout. A hung init (e.g. the
+  // SDK's worker setup swallowed by school WiFi) must not doom the whole page
+  // for 20s — on failure/hang we move on to the next mirror instead of
+  // locking out every other fallback.
+  const LUMIN_INIT_TIMEOUT_MS = 6000;
+  let initSettled = false;
+  const attemptInit = (): Promise<boolean> =>
+    new Promise(resolve => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
           settled = true;
-          clearTimeout(hangTimer);
-        },
-        e => failOnce(e)
-      );
-    } catch (e) {
-      failOnce(e);
-    }
-  };
+          clearTimeout(timer);
+          resolve(false);
+        }
+      }, LUMIN_INIT_TIMEOUT_MS);
+      try {
+        const r = (
+          window as unknown as {
+            Lumin?: { init: (o: unknown) => unknown };
+          }
+        ).Lumin?.init({ container: mount, theme: 'dark' });
+        Promise.resolve(r).then(
+          () => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(true);
+            }
+          },
+          () => {
+            if (!settled) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(false);
+            }
+          }
+        );
+      } catch {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(false);
+        }
+      }
+    });
   const w = window as unknown as { Lumin?: { init: (o: unknown) => void } };
   if (w.Lumin && typeof w.Lumin.init === 'function') {
     try {
@@ -953,7 +966,13 @@ function initHomepageTest(): void {
     } catch {
       /* ignore */
     }
-    start();
+    // Lumin already present (e.g. session restore): try init once with a short
+    // timeout. On success we're done; on failure/hang fall through to the
+    // mirror race so other sources get a chance before degrading.
+    void attemptInit().then(ok => {
+      if (ok) return;
+      void runMirrorRace();
+    });
     return;
   }
   // Staggered race: vendor (same-origin, beats keyword filters) -> worker
@@ -961,7 +980,7 @@ function initHomepageTest(): void {
   // STAGGER ms after the previous so the fastest healthy source wins without
   // flooding throttled school WiFi. First mirror to expose Lumin.init wins;
   // losers are removed. Per-mirror tag -> fetch-blob tiers preserved.
-  // (mirrorUrls/mirrorAttempts are declared above start() so init failures
+  // (mirrorUrls/mirrorAttempts are declared above the race so init failures
   // keep the per-mirror breakdown.)
   const SCRIPT_TIMEOUT_MS = LUMIN_SCRIPT_TAG_TIMEOUT_MS;
   const FETCH_BLOB_TIMEOUT_MS = LUMIN_FETCH_BLOB_TIMEOUT_MS;
@@ -1017,7 +1036,7 @@ function initHomepageTest(): void {
     }
     fail(
       new TypeError(
-        `lumin.min.js failed to load after ${mirrorAttempts.length} load attempts (srcs=${srcs || LUMIN_SDK_URL})`
+        `Lumin failed to initialize after ${mirrorAttempts.length} attempt(s) (srcs=${srcs || LUMIN_SDK_URL})`
       ),
       mirrorAttempts
     );
@@ -1044,8 +1063,8 @@ function initHomepageTest(): void {
   };
   const winRace = (tagId: string): void => {
     if (!tracker.win()) return;
+    initSettled = true;
     cleanupLosers(tagId);
-    start();
   };
   const loseMirror = (): void => {
     tracker.lose();
@@ -1083,7 +1102,22 @@ function initHomepageTest(): void {
       if (tracker.won) return;
       if (hasLumin()) {
         recordAttempt(url, tier, true, ms);
-        winRace(tagId);
+        void attemptInit().then(ok => {
+          if (initSettled || tracker.won) return;
+          if (ok) {
+            initSettled = true;
+            winRace(tagId);
+          } else {
+            recordAttempt(
+              url,
+              tier,
+              false,
+              null,
+              new DOMException('Lumin.init failed or timed out', 'AbortError')
+            );
+            loseMirror();
+          }
+        });
       } else {
         recordAttempt(
           url,
@@ -1236,7 +1270,22 @@ function initHomepageTest(): void {
         } catch {
           /* best-effort seeding only */
         }
-        winRace(tagId);
+        void attemptInit().then(ok => {
+          if (initSettled || tracker.won) return;
+          if (ok) {
+            initSettled = true;
+            winRace(tagId);
+          } else {
+            recordAttempt(
+              url,
+              'tag',
+              false,
+              null,
+              new DOMException('Lumin.init failed or timed out', 'AbortError')
+            );
+            loseMirror();
+          }
+        });
       } else {
         // Loaded but did not execute: CSP/adblock/filter stripped it.
         // Try the fetch-blob tier before giving up on this mirror.
@@ -1266,24 +1315,17 @@ function initHomepageTest(): void {
     };
     document.body.appendChild(s);
   };
-  if (hasLumin()) {
-    try {
-      console.log('[HomepageTest] Lumin global already present, calling init directly');
-    } catch {
-      /* ignore */
-    }
-    start();
-    return;
-  }
-  // (boot + worker fetch/XHR/Worker patches are installed above, before
-  // the already-present fast path, so they always precede any Lumin.init.)
-  // Staggered start: IDB tier + vendor fire immediately, worker proxy ~1.2s,
-  // POPs after. Early winner cancels the rest via winRace cleanup.
-  tryIdbTier();
-  mirrorUrls.forEach((_u, i) => {
-    const t = setTimeout(() => tryMirrorRace(i), i * LUMIN_RACE_STAGGER_MS);
-    raceTimers.push(t);
-  });
+  // Run the mirror race: IDB tier + vendor fire immediately, worker proxy
+  // ~1.2s, POPs after. A mirror only wins when Lumin.init resolves — a hung
+  // init moves to the next mirror instead of stalling the page.
+  const runMirrorRace = (): void => {
+    tryIdbTier();
+    mirrorUrls.forEach((_u, i) => {
+      const t = setTimeout(() => tryMirrorRace(i), i * LUMIN_RACE_STAGGER_MS);
+      raceTimers.push(t);
+    });
+  };
+  void runMirrorRace();
 }
 
 /** Shape of the event captured from `beforeinstallprompt`. */
