@@ -48,9 +48,7 @@ describe('isLuminWorkerUrl', () => {
 
   it('leaves same-origin worker URLs untouched', () => {
     const pageHost = window.location.hostname.toLowerCase();
-    expect(
-      isLuminWorkerUrl(`https://${pageHost}/v1/lumin.worker.js`)
-    ).toBe(false);
+    expect(isLuminWorkerUrl(`https://${pageHost}/v1/lumin.worker.js`)).toBe(false);
     expect(isLuminWorkerUrl('/v1/lumin.worker.js')).toBe(false);
   });
 });

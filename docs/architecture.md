@@ -72,9 +72,15 @@ src/
 ├── analytics/           # PostHog analytics initialization
 ├── cache/               # IndexedDB game HTML cache
 ├── cloak/               # Tab cloaking (about:blank shell, decoy title)
+├── diagnostics/         # School-WiFi probe battery + copyable report
 ├── games/               # Game catalog loading, rendering, launching
 │   ├── index.ts         # Core game logic (574 lines)
 │   └── html.ts          # HTML source game fetching + injection
+├── lumin-boot-proxy/    # Routes the SDK boot fetch through the worker proxy
+├── lumin-race/          # Staggered mirror-race bookkeeping
+├── lumin-state/         # Single-init guard for the Lumin SDK (see below)
+├── lumin-store/         # IndexedDB last-good copy of lumin.min.js
+├── lumin-worker-proxy/  # Routes the SDK worker-file fetch through the proxy
 ├── mediaos/             # MediaOS streaming page (base64-encoded)
 ├── panic/               # Panic key handler
 ├── security/            # DevTools deterrent, right-click blocking
@@ -87,6 +93,33 @@ src/
 │   └── apps.ts          # Calculator, Proxy, CinemaOS launchers
 └── utils/               # Shared utilities (URL safety, HTML escaping)
 ```
+
+## Lumin SDK: one init per page load
+
+The Lumin SDK is a page-wide singleton. `Lumin.init()` renders the game grid
+into a shadow root on the container element and **may only be called once**:
+
+- A second `init()` destroys the instance that is already rendering (the grid
+  disappears) and the replacement instance then rejects with
+  `Worker connection failed: domain fetch failed`.
+- Once an init has failed, every later init fails the same way — recovery
+  means reloading the page, not calling `init()` again.
+
+The homepage loader races several script mirrors (same-origin vendor copy,
+worker proxy, jsDelivr POPs, IndexedDB last-good copy) and every mirror that
+finished loading used to call `init()` on its own. The winner rendered the
+grid and the next mirror tore it down again, so the homepage reported
+"Test homepage failed to load" on every network — school WiFi included.
+
+`src/lumin-state` owns the single init slot (`claimLuminInit()`); the loader
+and the diagnostics panel both go through it. The diagnostics panel therefore
+reports the state of the live init instead of starting a second one (which
+would blank the games while the student is reading the report).
+
+The SDK also needs a *domain handshake* before it can start: it loads
+`<domain>/g/_iframe_probe` in a hidden iframe and waits for a `postMessage`.
+That request bypasses every fetch proxy in the page, so the diagnostics
+battery probes it directly ("Lumin domain handshake" row).
 
 ## Boot Sequence
 

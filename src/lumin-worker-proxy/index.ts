@@ -38,9 +38,10 @@ export function isLuminWorkerUrl(raw: string): boolean {
     // cross-origin worker fetch through the proxy keeps all worker traffic on
     // the resilient route. Same-origin URLs are left alone (they're not subject
     // to domain-based school filtering).
-    const pageHost = typeof window !== 'undefined' && window.location?.hostname
-      ? window.location.hostname.toLowerCase()
-      : '';
+    const pageHost =
+      typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname.toLowerCase()
+        : '';
     return u.hostname.toLowerCase() !== pageHost;
   } catch {
     return false;

@@ -164,6 +164,16 @@ export const LUMIN_WORKER_FILE_TARGETS: CDNTarget[] = [
 
 export const LUMIN_WORKER_PROXY_URL = `${LUMIN_WORKER_ORIGIN}/lumin/worker`;
 
+// Domains the Lumin SDK tries, in order, for its domain handshake (it loads
+// <origin>/g/_iframe_probe in a hidden iframe and waits for a postMessage).
+// The SDK walks this list until one answers, so the diagnostics probe does
+// the same. Mirrors of the same list live in the boot response.
+export const LUMIN_HANDSHAKE_ORIGINS: string[] = [
+  'https://a.luminsdk.com',
+  'https://drkesten.com',
+  'https://milpagan.org',
+];
+
 // Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
 // Probed by diagnostics only — not part of the games-online ping, since the
 // catalog can be browsable while Lumin init is blocked.

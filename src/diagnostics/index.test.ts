@@ -6,10 +6,17 @@ import {
   getEnvironmentSnapshot,
   guessLikelyCause,
   probeBackend,
+  probeLuminInit,
   _resetLogs,
   type DiagReport,
   type ProbeResult,
 } from './index.js';
+import {
+  _resetLuminState,
+  claimLuminInit,
+  markLuminInitFailed,
+  markLuminInitOk,
+} from '../lumin-state/index.js';
 
 function probe(name: string, ok: boolean, extra: Partial<ProbeResult> = {}): ProbeResult {
   return {
@@ -322,5 +329,36 @@ describe('probeBackend', () => {
     const r = await probeBackend('backend: x', 'https://example.com/api/v1/boot', 1000);
     expect(r.ok).toBe(false);
     expect(r.httpStatus).toBeNull();
+  });
+});
+
+describe('probeLuminInit', () => {
+  beforeEach(() => {
+    _resetLuminState();
+  });
+
+  it('never starts a second init when the page already ran one', async () => {
+    // A second Lumin.init() destroys the grid that is already rendered and
+    // then fails with "domain fetch failed" — the diagnostics panel must
+    // never trigger it.
+    claimLuminInit();
+    markLuminInitOk();
+    const initSpy = vi.fn();
+    (window as unknown as { Lumin?: unknown }).Lumin = { init: initSpy };
+    const res = await probeLuminInit(1000);
+    expect(initSpy).not.toHaveBeenCalled();
+    expect(res.ok).toBe(true);
+    expect(res.attempted).toBe(true);
+  });
+
+  it('reports the failure of the init the page already ran', async () => {
+    claimLuminInit();
+    markLuminInitFailed(new Error('domain fetch failed'));
+    const initSpy = vi.fn();
+    (window as unknown as { Lumin?: unknown }).Lumin = { init: initSpy };
+    const res = await probeLuminInit(1000);
+    expect(initSpy).not.toHaveBeenCalled();
+    expect(res.ok).toBe(false);
+    expect(res.errorMessage).toBe('domain fetch failed');
   });
 });

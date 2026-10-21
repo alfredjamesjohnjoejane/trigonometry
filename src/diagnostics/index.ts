@@ -19,7 +19,13 @@
  * throws — diagnostics must work especially when the network is broken.
  */
 
-import { CDN_TARGETS, LUMIN_BACKEND_TARGETS, LUMIN_WORKER_FILE_TARGETS } from '../types/index.js';
+import {
+  CDN_TARGETS,
+  LUMIN_BACKEND_TARGETS,
+  LUMIN_HANDSHAKE_ORIGINS,
+  LUMIN_WORKER_FILE_TARGETS,
+} from '../types/index.js';
+import { luminInitSnapshot } from '../lumin-state/index.js';
 import ST from '../storage/index.js';
 
 export interface ProbeResult {
@@ -455,6 +461,98 @@ function hintForClassification(c: string | null): string | null {
   }
 }
 
+/**
+ * The SDK's domain handshake probe.
+ *
+ * Before Lumin.init can work, the SDK proves that a backend domain is usable
+ * by loading `<origin>/g/_iframe_probe` in a hidden iframe and waiting for
+ * the `lumin-ok-frame` postMessage. A school filter that blocks that path
+ * (or the host) kills the init with "Worker connection failed: domain fetch
+ * failed" even though every fetch probe passes — the iframe handshake is the
+ * one request no static probe covers.
+ *
+ * The SDK walks its domain list in order, so the probe does the same and
+ * stops at the first domain that answers.
+ */
+export async function probeLuminDomainHandshake(
+  origins: string[],
+  timeout = 4000
+): Promise<ProbeResult> {
+  const start = now();
+  const base: ProbeResult = {
+    name: 'Lumin domain handshake',
+    url: origins[0] ? `${origins[0].replace(/\/+$/, '')}/g/_iframe_probe` : '',
+    method: 'iframe-message',
+    ok: false,
+    httpStatus: null,
+    ms: null,
+    errorName: null,
+    errorMessage: null,
+    classification: null,
+    note: null,
+  };
+  const t = timeoutMs(timeout, 5000);
+  for (const origin of origins) {
+    const target = `${origin.replace(/\/+$/, '')}/g/_iframe_probe`;
+    const attempt = await probeFrameMessage(target, t);
+    if (attempt.ok) {
+      base.ok = true;
+      base.url = target;
+      base.ms = Math.round(now() - start);
+      base.classification = 'ok';
+      base.note = `SDK handshake OK on ${new URL(target).hostname} (the iframe posted lumin-ok-frame).`;
+      return base;
+    }
+  }
+  base.ms = Math.round(now() - start);
+  base.errorName = 'TimeoutError';
+  base.errorMessage = 'no lumin-ok-frame message from any probed Lumin domain';
+  base.classification = 'domain-handshake-blocked';
+  base.note =
+    'The SDK loads <domain>/g/_iframe_probe in a hidden iframe and waits for its postMessage. None of the probed domains answered, so Lumin.init fails with "domain fetch failed" even when the boot/worker fetches succeed. Allowlist the Lumin hosts for the school network.';
+  return base;
+}
+
+/** Load a URL in a hidden iframe and wait for the SDK's handshake message. */
+function probeFrameMessage(url: string, timeout: number): Promise<{ ok: boolean }> {
+  return new Promise(resolve => {
+    let settled = false;
+    let iframe: HTMLIFrameElement | null = null;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        window.removeEventListener('message', onMessage);
+      } catch {
+        /* ignore */
+      }
+      try {
+        iframe?.remove();
+      } catch {
+        /* ignore */
+      }
+      resolve({ ok });
+    };
+    const onMessage = (e: MessageEvent): void => {
+      if (e.data === 'lumin-ok-frame') finish(true);
+    };
+    const timer = setTimeout(() => finish(false), timeout);
+    try {
+      window.addEventListener('message', onMessage);
+      iframe = document.createElement('iframe');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.setAttribute('tabindex', '-1');
+      iframe.style.cssText =
+        'position:absolute;width:1px;height:1px;left:-9999px;top:-9999px;border:0';
+      iframe.src = url;
+      document.body.appendChild(iframe);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 /** The default school-WiFi battery: same-origin + CDN + general-internet. */
 export function defaultProbeList(): Array<{ name: string; url: string }> {
   const base = import.meta.env.BASE_URL || './';
@@ -532,6 +630,16 @@ export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
   // Favicon img probe: cheap host-reachability signal for the CDN filter case.
   const img = await probeImage('cdn: jsDelivr (img)', 'https://cdn.jsdelivr.net/favicon.ico');
   results.push(img);
+  // Domain handshake: the one Lumin request that no fetch probe covers.
+  const handshake = await probeLuminDomainHandshake(LUMIN_HANDSHAKE_ORIGINS);
+  results.push(handshake);
+  try {
+    console.log(
+      `[Diag] probe ${handshake.ok ? 'PASS' : 'FAIL'} ${handshake.ms ?? '?'}ms ${handshake.method} ${handshake.name}${handshake.classification ? ` [${handshake.classification}]` : ''}`
+    );
+  } catch {
+    /* ignore */
+  }
   try {
     const pass = results.filter(r => r.ok).length;
     const luminRows = results.filter(r => r.name.includes('Lumin SDK'));
@@ -587,6 +695,28 @@ export async function probeLuminInit(timeout = 10000): Promise<LuminAttempt> {
       const attempts = (window as unknown as Record<string, unknown>).__luminMirrorAttempts;
       if (Array.isArray(attempts))
         console.log(`[Diag] mirror attempts on record: ${attempts.length}`);
+    } catch {
+      /* ignore */
+    }
+    return out;
+  }
+  // The Lumin SDK supports exactly ONE init per page load: a second init()
+  // destroys the grid that is already rendered and then rejects with
+  // "Worker connection failed: domain fetch failed". Probing init while the
+  // homepage is using the SDK would therefore blank the games — report the
+  // live state of the real init instead.
+  const live = luminInitSnapshot();
+  if (live.phase !== 'idle') {
+    out.attempted = true;
+    out.ok = live.phase === 'ok';
+    out.errorName = live.errorName;
+    out.errorMessage = live.errorMessage;
+    out.ms = live.startedAt ? Math.max(0, Math.round(now() - live.startedAt)) : null;
+    out.luminFetchUrls = live.fetchUrls;
+    try {
+      console.log(
+        `[Diag] lumin.init skipped — the page already ran one (phase=${live.phase}, urls=${live.fetchUrls.length})`
+      );
     } catch {
       /* ignore */
     }
@@ -699,16 +829,23 @@ export function guessLikelyCause(probes: ProbeResult[], lumin: LuminAttempt): st
     p => p.name.startsWith('worker:') && !p.name.includes('no-cors')
   );
   const workerAnyOk = probes.some(p => p.name.startsWith('worker:') && p.ok);
+  // The SDK's domain handshake: it loads <origin>/g/_iframe_probe in a hidden
+  // iframe and waits for a postMessage before it talks to the backend. This
+  // request bypasses every fetch-based proxy in the page, so a filter that
+  // blocks it fails the init even when the boot/worker rows are green.
+  const handshake = probes.find(p => p.name === 'Lumin domain handshake');
+  const handshakeOk = handshake?.ok === true;
+  if (sameOriginOk && handshake && !handshakeOk)
+    return 'LUMIN-DOMAIN-HANDSHAKE-BLOCKED: the script loads and the boot/worker fetches work, but the SDK cannot complete its domain handshake (it loads <domain>/g/_iframe_probe in a hidden iframe and waits for a postMessage). No probed domain answered, so Lumin.init fails with "Worker connection failed: domain fetch failed". Allowlist the Lumin hosts for the school network (the whole host, not just /api/v1/boot).';
   if (sameOriginOk && workerProbes.length > 0 && !workerAnyOk && lumin.present && backendAnyOk)
     return 'LUMIN-WORKER-BLOCKED: the script and backend boot hosts load, but ALL /v1/lumin.worker.js file fetches fail, including the worker proxy. Lumin.init fetches the worker file before creating its Worker ("Worker connection failed: domain fetch failed"). Worker fetches are routed via the /lumin/worker proxy with direct fallback — if the proxy row also fails, the proxy host itself is filtered. Allowlist the worker origin, or use another network.';
   // A rejected Lumin.init is a more specific signal than a mirror split, so it
   // outranks the mirror branches below: the script demonstrably loaded and
   // executed (e.g. via the same-origin vendor copy, which is not a probed
-  // mirror), and init still failed — usually the "domain fetch failed" worker
-  // fetch. Check the worker-file rows: Lumin.init fetches /v1/lumin.worker.js
-  // before creating its Worker.
+  // mirror), and init still failed. The usual cause is the SDK's domain
+  // handshake (see the row above) or a blocked worker-file fetch.
   if (lumin.present && lumin.attempted && !lumin.ok)
-    return `LUMIN-INIT failed (${lumin.errorName ?? 'unknown'}): script loaded but init rejected. Likely Lumin backend or worker-file fetch blocked, or Function()-eval blocked. Check the worker-file rows below. Error: ${(lumin.errorMessage ?? '').slice(0, 160)}`;
+    return `LUMIN-INIT failed (${lumin.errorName ?? 'unknown'}): script loaded but init rejected. Check the "Lumin domain handshake" row (the SDK loads <domain>/g/_iframe_probe in a hidden iframe) and the worker-file rows — a filter on either one kills the init. Note: the SDK allows only ONE init per page load, so a retry needs a page reload. Error: ${(lumin.errorMessage ?? '').slice(0, 160)}`;
   if (sameOriginOk && luminProbes.length > 1 && luminOk.length > 0 && luminFail.length > 0)
     return `PARTIAL-MIRROR-BLOCK: ${luminOk.length}/${luminProbes.length} Lumin mirrors reachable (${luminOk.map(p => p.name).join(', ')}). The loader fallback should have tried the working one — if the page still fails, the script loaded but did not execute (adblock/CSP). Retry, then check the mirror rows + console.`;
   if (sameOriginOk && (faviconOk || anyNoCorsOk) && luminProbes.length > 0 && luminOk.length === 0)
@@ -735,16 +872,18 @@ export function buildChecklist(report: DiagReport): string[] {
     p => p.name.startsWith('worker:') && !p.name.includes('no-cors')
   );
   const workerOk = workerProbes.filter(p => p.ok).length;
+  const handshake = report.probes.find(p => p.name === 'Lumin domain handshake');
   return [
     `1. Browser online flag: ${report.env.onLine ? 'ONLINE' : 'OFFLINE'} — if OFFLINE, rejoin WiFi / accept the captive portal.`,
     `2. Same-origin rows OK but CDN rows fail => school filter is blocking jsdelivr. Ask IT to allowlist cdn.jsdelivr.net + fastly/gcore/testingcf.jsdelivr.net + the worker proxy. Mirrors passing now: ${luminOk}/${luminProbes.length}.`,
     '3. ALL Lumin mirrors fail but favicon passes => filter blocks the /gh/luminsdk/script path itself; the same-origin vendor copy (vendor/lumin.min.js), worker proxy (/lumin/script), and IDB last-good store are the fix — check they appear in the mirror rows.',
     `4. Script loads but backend rows all fail => Lumin boot hosts are filtered (backends passing now: ${backendOk}/${backendProbes.length}). The worker proxy row (/lumin/boot) should pass first; if it fails too, allowlist the worker origin or a.luminsdk.com/api/v1/boot.`,
     `5. Script + backends pass but worker-file rows all fail => the /v1/lumin.worker.js path is filtered (worker files passing now: ${workerOk}/${workerProbes.length}). The /lumin/worker proxy row should pass first; the page now routes worker fetches through it automatically — if it fails too, allowlist the worker origin.`,
-    '6. lumin.min.js loads but Lumin.init rejects => Lumin backend or script-eval is blocked; copy the Lumin error line below for IT.',
-    '7. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
-    '8. Loader runs a staggered race (IDB last-good + vendor immediately, worker proxy ~1.2s, then POPs every 1.2s); check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror [tag|fetch-blob|idb] breakdown.',
-    '9. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
+    `6. "Lumin domain handshake" row ${handshake ? (handshake.ok ? 'PASSED' : 'FAILED') : 'missing'} => the SDK loads <domain>/g/_iframe_probe in a hidden iframe and waits for a postMessage before it can start. When this row fails, Lumin.init always fails with "domain fetch failed" even if every other row is green — allowlist the Lumin hosts for the school network.`,
+    '7. lumin.min.js loads but Lumin.init rejects => Lumin backend, domain handshake or script-eval is blocked; copy the Lumin error line below for IT. Note: the SDK allows only ONE init per page load, so a retry means reloading the page.',
+    '8. Timeouts (>7s) on every row => throttled WiFi; wait, move closer to AP, retry.',
+    '9. Loader runs a staggered race (IDB last-good + vendor immediately, worker proxy ~1.2s, then POPs every 1.2s); only the FIRST mirror that loads the SDK initialises it — check console [HomepageTest]/[Diag] lines and window.__luminMirrorAttempts for the per-mirror [tag|fetch-blob|idb] breakdown.',
+    '10. Press "Copy report" and paste it into the bug report so the failure can be diagnosed off-site.',
   ];
 }
 

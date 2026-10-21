@@ -36,6 +36,14 @@ import {
 import { getLuminScript, saveLuminScript } from '../lumin-store/index.js';
 import { installLuminBootProxy } from '../lumin-boot-proxy/index.js';
 import { installLuminWorkerProxy } from '../lumin-worker-proxy/index.js';
+import {
+  claimLuminInit,
+  luminInitSnapshot,
+  markLuminInitFailed,
+  markLuminInitOk,
+  recordLuminFetchUrl,
+  setLuminInitPromise,
+} from '../lumin-state/index.js';
 import { createRaceTracker } from '../lumin-race/tracker.js';
 import { getCacheSize } from '../cache/index.js';
 import { MEDIAOS_BASE64 } from '../mediaos/page.js';
@@ -689,6 +697,100 @@ function startPlayTimer(): void {
   }, 1000);
 }
 
+/**
+ * Fresh container element for `Lumin.init()`.
+ *
+ * The SDK renders the game grid into a shadow root attached to the container
+ * element, and an element can only ever carry one shadow root. A container
+ * that already rendered (or already failed) therefore has to be replaced by a
+ * new element instead of being reused.
+ */
+function createLuminContainer(host: HTMLElement): HTMLElement {
+  const el = document.createElement('div');
+  el.id = 'lumin-container';
+  el.style.width = '100%';
+  try {
+    host.replaceChildren(el);
+  } catch {
+    /* ignore */
+  }
+  return el;
+}
+
+/**
+ * Render the built-in catalog (data/games_merged.json) into the homepage
+ * mount. The catalog is served from this origin, so it stays available when
+ * the Lumin backend is blocked by a school filter — the hub keeps playable
+ * games instead of an empty error box.
+ */
+async function renderLocalCatalogFallback(mount: HTMLElement): Promise<void> {
+  try {
+    await loadGames();
+  } catch {
+    return;
+  }
+  try {
+    if (mount.querySelector('#gg')) return;
+  } catch {
+    /* ignore */
+  }
+  const grid = document.createElement('div');
+  grid.id = 'gg';
+  grid.className = 'gg';
+  grid.style.cssText = 'padding:16px;gap:16px';
+  mount.appendChild(grid);
+  try {
+    renderGames();
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Record every URL fetched while the Lumin SDK boots.
+ *
+ * The SDK assembles its URLs at runtime (boot endpoint, worker file, icon
+ * CDN), so only a live capture tells us which host a school filter blocked.
+ * The wrapper is installed on top of the existing (proxy-patched) fetch, so
+ * the recorded URLs are the ones the SDK asked for, not the rewritten ones.
+ *
+ * @returns a function that restores the original fetch.
+ */
+function captureLuminFetchUrls(): () => void {
+  try {
+    const w = window as unknown as Record<string, unknown>;
+    const orig = window.fetch;
+    if (typeof orig !== 'function') return () => {};
+    const patched = function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+      try {
+        const u =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input && typeof input === 'object' && 'url' in input
+                ? String((input as Request).url)
+                : '';
+        if (u) recordLuminFetchUrl(u);
+      } catch {
+        /* ignore */
+      }
+      return orig.call(window, input, init);
+    };
+    w.__luminFetchRecorder = patched;
+    window.fetch = patched as typeof window.fetch;
+    return () => {
+      try {
+        if (window.fetch === patched) window.fetch = orig;
+      } catch {
+        /* ignore */
+      }
+    };
+  } catch {
+    return () => {};
+  }
+}
+
 function initHomepageTest(): void {
   const mount = document.getElementById('test-homepage-games');
   if (!mount) return;
@@ -696,7 +798,13 @@ function initHomepageTest(): void {
   mount.dataset.ready = '1';
   installLogCapture();
   installDiagGlobals();
+  let failureShown = false;
   const fail = (rawErr?: unknown, mirrorAttempts: LuminMirrorAttempt[] = []) => {
+    // Only one failure screen: the init failure and the "all mirrors
+    // exhausted" path can both fire, and rebuilding the UI would drop the
+    // catalog fallback that is already on screen.
+    if (failureShown) return;
+    failureShown = true;
     mount.dataset.ready = '0';
     mount.textContent = '';
     const errText = rawErr === undefined ? '' : describeError(rawErr);
@@ -800,10 +908,16 @@ function initHomepageTest(): void {
         : 'background:rgba(255,255,255,.08);color:#e0e0e0;border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:8px 16px;cursor:pointer';
       return b;
     };
-    const retry = mkBtn('Retry', true);
+    const retry = mkBtn('Reload', true);
     retry.addEventListener('click', () => {
-      mount.dataset.ready = '';
-      initHomepageTest();
+      // The Lumin SDK supports exactly one init per page load: a second
+      // Lumin.init() destroys the rendered grid and then fails with
+      // "domain fetch failed", so retrying means reloading the page.
+      try {
+        location.reload();
+      } catch {
+        /* ignore */
+      }
     });
     const diag = mkBtn('🔍 Diagnose connection', false);
     diag.addEventListener('click', () => {
@@ -852,7 +966,7 @@ function initHomepageTest(): void {
     degraded.style.cssText =
       'font-size:.78rem;color:#888;margin-top:12px;line-height:1.6;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:10px 12px';
     degraded.textContent =
-      'Still blocked? Your cached games and catalog remain usable without Lumin. ';
+      'The live library is unreachable, so the built-in game catalog is shown below instead. ';
     const cachedBtn = mkBtn('Show cached games', false);
     cachedBtn.addEventListener('click', () => {
       try {
@@ -867,7 +981,7 @@ function initHomepageTest(): void {
       }
       void getCacheSize()
         .then(n => {
-          degraded.textContent = `Cached games available offline: ${n}. Browse the grid below — live homepage features need Lumin, but cached entries play. `;
+          degraded.textContent = `Cached games available offline: ${n}. Browse the grid below — the live library needs Lumin, but cached entries play. `;
           degraded.appendChild(cachedBtn);
         })
         .catch(() => {});
@@ -889,6 +1003,9 @@ function initHomepageTest(): void {
       div.appendChild(debug);
     }
     mount.appendChild(div);
+    // The live library is unreachable — fall back to the same-origin catalog
+    // so the hub still shows playable games.
+    void renderLocalCatalogFallback(mount);
   };
   // Route the stub's boot + worker-file fetches through the worker proxy
   // (direct fallback on proxy failure). Installed once per page; must precede
@@ -914,68 +1031,113 @@ function initHomepageTest(): void {
   } catch {
     /* ignore */
   }
-  // Call Lumin.init() with a short per-mirror timeout. A hung init (e.g. the
-  // SDK's worker setup swallowed by school WiFi) must not doom the whole page
-  // for 20s — on failure/hang we move on to the next mirror instead of
-  // locking out every other fallback.
-  const LUMIN_INIT_TIMEOUT_MS = 6000;
-  let initSettled = false;
-  const attemptInit = (): Promise<boolean> =>
-    new Promise(resolve => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(false);
-        }
-      }, LUMIN_INIT_TIMEOUT_MS);
-      try {
-        const r = (
-          window as unknown as {
-            Lumin?: { init: (o: unknown) => unknown };
-          }
-        ).Lumin?.init({ container: mount, theme: 'dark' });
-        Promise.resolve(r).then(
-          () => {
-            if (!settled) {
-              settled = true;
-              clearTimeout(timer);
-              resolve(true);
-            }
-          },
-          () => {
-            if (!settled) {
-              settled = true;
-              clearTimeout(timer);
-              resolve(false);
-            }
-          }
-        );
-      } catch {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timer);
-          resolve(false);
-        }
-      }
-    });
-  const w = window as unknown as { Lumin?: { init: (o: unknown) => void } };
-  if (w.Lumin && typeof w.Lumin.init === 'function') {
-    try {
-      console.log('[HomepageTest] Lumin global already present, calling init directly');
-    } catch {
-      /* ignore */
-    }
-    // Lumin already present (e.g. session restore): try init once with a short
-    // timeout. On success we're done; on failure/hang fall through to the
-    // mirror race so other sources get a chance before degrading.
-    void attemptInit().then(ok => {
-      if (ok) return;
-      void runMirrorRace();
-    });
-    return;
+  // ---- Lumin.init(): exactly ONCE per page load ---------------------------
+  //
+  // The SDK is a page-wide singleton. A second Lumin.init() destroys the
+  // instance that is already rendering (its grid disappears from the page)
+  // and the replacement instance then rejects with "Worker connection failed:
+  // domain fetch failed". Once an init has failed, every later init fails
+  // the same way — recovery needs a page reload, not another init() call.
+  //
+  // The loader races several script mirrors (same-origin vendor copy, worker
+  // proxy, jsDelivr POPs, IndexedDB last-good copy) and every mirror that
+  // finished loading used to call init() on its own: the mirror that won
+  // rendered the grid and the next mirror tore it down again. That race is
+  // what made the homepage report "Test homepage failed to load" on every
+  // network — school WiFi included.
+  //
+  // src/lumin-state owns the single-init slot, so the first mirror to load
+  // the SDK is the only one that initialises it.
+  const LUMIN_INIT_TIMEOUT_MS = 30000;
+  // Placeholder shown while the SDK boots (school WiFi is slow). Removed as
+  // soon as the init resolves.
+  const placeholder = document.createElement('div');
+  placeholder.id = 'lumin-placeholder';
+  placeholder.style.cssText =
+    'color:#999;text-align:center;padding:48px 16px;font-size:.9rem;line-height:1.6';
+  placeholder.textContent = 'Loading the game library…';
+  const initContainer = createLuminContainer(mount);
+  try {
+    mount.replaceChildren(initContainer, placeholder);
+  } catch {
+    /* ignore */
   }
+  const startLuminInit = (tagId: string): void => {
+    // The guard makes this a no-op for every mirror after the first one.
+    if (!claimLuminInit()) {
+      try {
+        console.log('[HomepageTest] Lumin.init already claimed, skipping', tagId);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+    // Record what the SDK fetches while it boots. The URLs are needed by the
+    // diagnostics report: the SDK builds them at runtime, so static probes
+    // cannot see which host a school filter actually blocked.
+    const restoreFetch = captureLuminFetchUrls();
+    let settled = false;
+    const finish = (ok: boolean, err?: unknown): boolean => {
+      if (settled) return ok;
+      settled = true;
+      clearTimeout(timer);
+      restoreFetch();
+      if (ok) {
+        markLuminInitOk();
+        try {
+          placeholder.remove();
+        } catch {
+          /* ignore */
+        }
+        winRace(tagId);
+        return true;
+      }
+      markLuminInitFailed(err);
+      return false;
+    };
+    // A slow init is not a failed init: school WiFi can take a while for the
+    // boot + worker-file round trips. Only the SDK's own rejection counts as
+    // failure; the timer only upgrades the placeholder to a "still loading"
+    // hint (and a reload button) so the page never looks dead.
+    const timer = setTimeout(() => {
+      if (settled) return;
+      try {
+        placeholder.textContent =
+          'Still loading the game library — school WiFi can be slow. This page will update when it arrives.';
+      } catch {
+        /* ignore */
+      }
+    }, LUMIN_INIT_TIMEOUT_MS);
+    let p: Promise<boolean>;
+    try {
+      const r = (
+        window as unknown as {
+          Lumin?: { init: (o: unknown) => unknown };
+        }
+      ).Lumin?.init({ container: initContainer, theme: 'dark' });
+      p = Promise.resolve(r).then(
+        () => finish(true),
+        (e: unknown) => {
+          finish(false, e);
+          return false;
+        }
+      );
+    } catch (e) {
+      p = Promise.resolve(finish(false, e));
+    }
+    setLuminInitPromise(p);
+    void p.then(ok => {
+      if (ok) return;
+      // The SDK cannot be re-initialised after a failure, so this is
+      // terminal: show the fallback + diagnostics instead of racing mirrors.
+      fail(
+        new TypeError(
+          'Lumin.init() failed — the game library could not be started (the SDK only supports one init per page load)'
+        ),
+        mirrorAttempts
+      );
+    });
+  };
   // Staggered race: vendor (same-origin, beats keyword filters) -> worker
   // proxy (no `luminsdk` substring) -> jsDelivr POPs. Each mirror starts
   // STAGGER ms after the previous so the fastest healthy source wins without
@@ -1064,7 +1226,6 @@ function initHomepageTest(): void {
   };
   const winRace = (tagId: string): void => {
     if (!tracker.win()) return;
-    initSettled = true;
     cleanupLosers(tagId);
   };
   const loseMirror = (): void => {
@@ -1103,22 +1264,8 @@ function initHomepageTest(): void {
       if (tracker.won) return;
       if (hasLumin()) {
         recordAttempt(url, tier, true, ms);
-        void attemptInit().then(ok => {
-          if (initSettled || tracker.won) return;
-          if (ok) {
-            initSettled = true;
-            winRace(tagId);
-          } else {
-            recordAttempt(
-              url,
-              tier,
-              false,
-              null,
-              new DOMException('Lumin.init failed or timed out', 'AbortError')
-            );
-            loseMirror();
-          }
-        });
+        // Exactly one mirror initialises the SDK; the rest are ignored.
+        startLuminInit(tagId);
       } else {
         recordAttempt(
           url,
@@ -1271,22 +1418,8 @@ function initHomepageTest(): void {
         } catch {
           /* best-effort seeding only */
         }
-        void attemptInit().then(ok => {
-          if (initSettled || tracker.won) return;
-          if (ok) {
-            initSettled = true;
-            winRace(tagId);
-          } else {
-            recordAttempt(
-              url,
-              'tag',
-              false,
-              null,
-              new DOMException('Lumin.init failed or timed out', 'AbortError')
-            );
-            loseMirror();
-          }
-        });
+        // Exactly one mirror initialises the SDK; the rest are ignored.
+        startLuminInit(tagId);
       } else {
         // Loaded but did not execute: CSP/adblock/filter stripped it.
         // Try the fetch-blob tier before giving up on this mirror.
@@ -1317,8 +1450,10 @@ function initHomepageTest(): void {
     document.body.appendChild(s);
   };
   // Run the mirror race: IDB tier + vendor fire immediately, worker proxy
-  // ~1.2s, POPs after. A mirror only wins when Lumin.init resolves — a hung
-  // init moves to the next mirror instead of stalling the page.
+  // ~1.2s, POPs after. The first mirror that loads the SDK wins the race and
+  // is the one that initialises it — later mirrors only re-load the same
+  // script and are ignored (a second Lumin.init would tear the rendered grid
+  // down again).
   const runMirrorRace = (): void => {
     tryIdbTier();
     mirrorUrls.forEach((_u, i) => {
@@ -1326,6 +1461,26 @@ function initHomepageTest(): void {
       raceTimers.push(t);
     });
   };
+  // An init that already failed cannot be retried in this page load: the SDK
+  // supports exactly one init per page load, and every later init fails the
+  // same way. Show the failure UI (with the catalog fallback) instead of
+  // racing the mirrors again.
+  if (luminInitSnapshot().phase === 'failed') {
+    fail(new TypeError('Lumin.init() already failed on this page load'), mirrorAttempts);
+    return;
+  }
+  // Lumin already present (e.g. the script was restored from a previous
+  // page load): initialise straight away instead of racing mirrors.
+  const w = window as unknown as { Lumin?: { init?: unknown } };
+  if (w.Lumin && typeof w.Lumin.init === 'function') {
+    try {
+      console.log('[HomepageTest] Lumin global already present, calling init directly');
+    } catch {
+      /* ignore */
+    }
+    startLuminInit('lumin-script');
+    return;
+  }
   void runMirrorRace();
 }
 
