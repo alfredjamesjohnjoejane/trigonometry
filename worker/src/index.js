@@ -41,13 +41,58 @@ const DESCRIPTION_MAX_LEN = 50;
 // Matched as whole words only (never substrings), so e.g. "class" or
 // "password" are NOT flagged by the "ass" entry.
 const DESCRIPTION_BANNED_WORDS = new Set([
-  'fuck', 'fucker', 'fucking', 'fucked', 'shit', 'shitty', 'bitch', 'bitches',
-  'cunt', 'dick', 'dickhead', 'cock', 'cocksucker', 'pussy', 'tits', 'titties',
-  'boobs', 'boob', 'porn', 'porno', 'porns', 'hentai', 'xxx', 'slut', 'sluts',
-  'whore', 'whores', 'escort', 'escorts', 'nude', 'nudes', 'nudity', 'naked',
-  'sex', 'sexy', 'masturbate', 'orgasm', 'cum', 'cumming', 'dildo', 'blowjob',
-  'handjob', 'anal', 'milf', 'incest', 'bestiality', 'asshole', 'bastard',
-  'nigga', 'nigger', 'faggot', 'retard',
+  'fuck',
+  'fucker',
+  'fucking',
+  'fucked',
+  'shit',
+  'shitty',
+  'bitch',
+  'bitches',
+  'cunt',
+  'dick',
+  'dickhead',
+  'cock',
+  'cocksucker',
+  'pussy',
+  'tits',
+  'titties',
+  'boobs',
+  'boob',
+  'porn',
+  'porno',
+  'porns',
+  'hentai',
+  'xxx',
+  'slut',
+  'sluts',
+  'whore',
+  'whores',
+  'escort',
+  'escorts',
+  'nude',
+  'nudes',
+  'nudity',
+  'naked',
+  'sex',
+  'sexy',
+  'masturbate',
+  'orgasm',
+  'cum',
+  'cumming',
+  'dildo',
+  'blowjob',
+  'handjob',
+  'anal',
+  'milf',
+  'incest',
+  'bestiality',
+  'asshole',
+  'bastard',
+  'nigga',
+  'nigger',
+  'faggot',
+  'retard',
 ]);
 
 // Catches http(s)://..., www...., and bare domains like foo.com/page.
@@ -64,7 +109,10 @@ export function checkDescription(text) {
   if (DESCRIPTION_LINK_PATTERN.test(t)) {
     return { ok: false, reason: 'Links are not allowed in descriptions.' };
   }
-  const words = t.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const words = t
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
   for (const w of words) {
     if (DESCRIPTION_BANNED_WORDS.has(w)) {
       return { ok: false, reason: 'That description contains blocked words.' };
@@ -86,8 +134,7 @@ const POSTHOG_UPSTREAM = 'https://us.i.posthog.com';
 // `luminsdk` substring, allowlisted as the marketplace API origin) gives the
 // page an extra mirror that survives keyword/path filters. The client tries
 // vendor -> worker proxy -> jsDelivr POPs in a staggered race.
-const LUMIN_SCRIPT_UPSTREAM =
-  'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
+const LUMIN_SCRIPT_UPSTREAM = 'https://cdn.jsdelivr.net/gh/luminsdk/script@latest/lumin.min.js';
 // Lumin worker file upstreams. Lumin.init fetches /v1/lumin.worker.js from
 // each boot host before creating its Worker; school filters that 503 the
 // jsDelivr SDK path can block this path too while /api/v1/boot stays
@@ -105,6 +152,22 @@ const LUMIN_BOOT_UPSTREAMS = [
   'https://milpagan.org/api/v1/boot',
   'https://catholicrebuttals.com/api/v1/boot',
   'https://instructure-ramen.hpsschools.org/api/v1/boot',
+];
+// Origins the Lumin game player loads resources from (game player pages,
+// their assets, and third-party assets such as the Ruffle Flash emulator).
+// Every resource is proxied through the worker via /lumin/x/<origin>/<path>,
+// so the game keeps working even when the school filters the original hosts
+// or the /g/ game paths.
+const LUMIN_PROXY_ORIGINS = [
+  'a.luminsdk.com',
+  'drkesten.com',
+  'milpagan.org',
+  'catholicrebuttals.com',
+  'instructure-ramen.hpsschools.org',
+  'unpkg.com',
+  'cdn.r9x.in',
+  'www.googletagmanager.com',
+  'code.jquery.com',
 ];
 
 function corsHeaders() {
@@ -207,34 +270,109 @@ const ADULT_TLDS = new Set(['xxx', 'adult', 'porn', 'sex', 'sexy']);
 
 // Well-known adult domains (exact host or any subdomain matches).
 const BLOCKED_DOMAINS = new Set([
-  'pornhub.com', 'xvideos.com', 'xnxx.com', 'xhamster.com', 'redtube.com',
-  'youporn.com', 'youjizz.com', 'tube8.com', 'spankbang.com', 'spankwire.com',
-  'keezmovies.com', 'tnaflix.com', 'empaflix.com', 'eporner.com', 'pornhd.com',
-  'pornone.com', 'porn.com', 'beeg.com', '4tube.com', 'drtuber.com', 'fux.com',
-  'hclips.com', 'vporn.com', 'upornia.com', 'txxx.com', 'nudevista.com',
-  'pornoxo.com', 'brazzers.com', 'bangbros.com', 'realitykings.com',
-  'naughtyamerica.com', 'mofos.com', 'teamskeet.com', 'blacked.com',
-  'tushy.com', 'vixen.com', 'twistys.com', 'penthouse.com', 'playboy.com',
-  'hustler.com', 'onlyfans.com', 'fansly.com', 'manyvids.com',
-  'clips4sale.com', 'chaturbate.com', 'myfreecams.com', 'livejasmin.com',
-  'streamate.com', 'camsoda.com', 'bongacams.com', 'stripchat.com',
-  'xlovecam.com', 'cam4.com', 'nhentai.net', 'hanime.tv',
-  'hentaifoundry.com', 'e621.net', 'motherless.com', 'efukt.com',
+  'pornhub.com',
+  'xvideos.com',
+  'xnxx.com',
+  'xhamster.com',
+  'redtube.com',
+  'youporn.com',
+  'youjizz.com',
+  'tube8.com',
+  'spankbang.com',
+  'spankwire.com',
+  'keezmovies.com',
+  'tnaflix.com',
+  'empaflix.com',
+  'eporner.com',
+  'pornhd.com',
+  'pornone.com',
+  'porn.com',
+  'beeg.com',
+  '4tube.com',
+  'drtuber.com',
+  'fux.com',
+  'hclips.com',
+  'vporn.com',
+  'upornia.com',
+  'txxx.com',
+  'nudevista.com',
+  'pornoxo.com',
+  'brazzers.com',
+  'bangbros.com',
+  'realitykings.com',
+  'naughtyamerica.com',
+  'mofos.com',
+  'teamskeet.com',
+  'blacked.com',
+  'tushy.com',
+  'vixen.com',
+  'twistys.com',
+  'penthouse.com',
+  'playboy.com',
+  'hustler.com',
+  'onlyfans.com',
+  'fansly.com',
+  'manyvids.com',
+  'clips4sale.com',
+  'chaturbate.com',
+  'myfreecams.com',
+  'livejasmin.com',
+  'streamate.com',
+  'camsoda.com',
+  'bongacams.com',
+  'stripchat.com',
+  'xlovecam.com',
+  'cam4.com',
+  'nhentai.net',
+  'hanime.tv',
+  'hentaifoundry.com',
+  'e621.net',
+  'motherless.com',
+  'efukt.com',
   'literotica.com',
 ]);
 
 // Flagged only when a FULL hostname label equals one of these.
 const ADULT_LABELS = new Set([
-  'porn', 'porno', 'porns', 'porntube', 'sextube', 'hentaitube', 'xxx',
-  'hentai', 'sex', 'sexy', 'adult', 'escort', 'escorts', 'camgirl',
-  'camgirls', 'nude', 'nudes', 'boobs', 'milf',
+  'porn',
+  'porno',
+  'porns',
+  'porntube',
+  'sextube',
+  'hentaitube',
+  'xxx',
+  'hentai',
+  'sex',
+  'sexy',
+  'adult',
+  'escort',
+  'escorts',
+  'camgirl',
+  'camgirls',
+  'nude',
+  'nudes',
+  'boobs',
+  'milf',
 ]);
 
 // Direct executable downloads are a classic malware vector; the marketplace
 // is for site links, not binaries.
 const BLOCKED_EXTENSIONS = new Set([
-  'exe', 'msi', 'apk', 'apks', 'xapk', 'dmg', 'pkg', 'scr', 'bat', 'cmd',
-  'com', 'pif', 'ps1', 'vbs', 'msc',
+  'exe',
+  'msi',
+  'apk',
+  'apks',
+  'xapk',
+  'dmg',
+  'pkg',
+  'scr',
+  'bat',
+  'cmd',
+  'com',
+  'pif',
+  'ps1',
+  'vbs',
+  'msc',
 ]);
 /* FILTER-LISTS-END */
 
@@ -259,12 +397,15 @@ export function checkUrlSafety(siteUrl) {
       return { ok: false, reason: 'That site is on the blocklist.' };
     }
   }
-  if (labels.some((l) => ADULT_LABELS.has(l))) {
+  if (labels.some(l => ADULT_LABELS.has(l))) {
     return { ok: false, reason: 'Adult sites are not allowed in this marketplace.' };
   }
   const ext = u.pathname.toLowerCase().match(/\.([a-z0-9]{1,5})$/);
   if (ext && BLOCKED_EXTENSIONS.has(ext[1])) {
-    return { ok: false, reason: 'Direct app/binary downloads are not allowed — submit the site instead.' };
+    return {
+      ok: false,
+      reason: 'Direct app/binary downloads are not allowed — submit the site instead.',
+    };
   }
   return { ok: true };
 }
@@ -290,7 +431,8 @@ async function checkSafeBrowsing(siteUrl, env) {
   try {
     if (env.RL) {
       const cached = await env.RL.get(cacheKey);
-      if (cached === 'bad') return { ok: false, reason: 'That URL was flagged as unsafe (malware/phishing).' };
+      if (cached === 'bad')
+        return { ok: false, reason: 'That URL was flagged as unsafe (malware/phishing).' };
       if (cached === 'ok') return { ok: true, cached: true };
     }
   } catch (err) {}
@@ -304,7 +446,12 @@ async function checkSafeBrowsing(siteUrl, env) {
         body: JSON.stringify({
           client: { clientId: 'jesherhead-marketplace', clientVersion: '1.0' },
           threatInfo: {
-            threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
+            threatTypes: [
+              'MALWARE',
+              'SOCIAL_ENGINEERING',
+              'UNWANTED_SOFTWARE',
+              'POTENTIALLY_HARMFUL_APPLICATION',
+            ],
             platformTypes: ['ANY_PLATFORM'],
             threatEntryTypes: ['URL'],
             threatEntries: [{ url: siteUrl }],
@@ -324,8 +471,11 @@ async function checkSafeBrowsing(siteUrl, env) {
     }
   } catch (err) {}
   if (matches.length) {
-    const types = [...new Set(matches.map((m) => m.threatType).filter(Boolean))].join(', ');
-    return { ok: false, reason: 'That URL was flagged as unsafe' + (types ? ' (' + types + ')' : '') + '.' };
+    const types = [...new Set(matches.map(m => m.threatType).filter(Boolean))].join(', ');
+    return {
+      ok: false,
+      reason: 'That URL was flagged as unsafe' + (types ? ' (' + types + ')' : '') + '.',
+    };
   }
   return { ok: true };
 }
@@ -345,7 +495,7 @@ function issueToEntry(issue, tallyOverride) {
   const urlMatch = body.match(/^URL:[ \t]*(.+)[ \t]*$/m);
   const descMatch = body.match(/^Description:[ \t]*(.*)[ \t]*$/m);
   const catMatch = body.match(/^Category:[ \t]*([a-z]*)[ \t]*$/m);
-  const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+  const labels = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
   // Vote tallies live in KV (see getTally): every IP gets its own vote, so
   // counts can grow past 1. GitHub issue reactions are NOT the tally — all
   // marketplace votes used to be cast as the single token user, and GitHub
@@ -355,7 +505,7 @@ function issueToEntry(issue, tallyOverride) {
   // (used once to seed the tally, then ignored).
   const baseline = issue.reactions || {};
   const t = tallyOverride || {};
-  const num = (v) => {
+  const num = v => {
     const n = parseInt(v, 10);
     return Number.isFinite(n) && n > 0 ? n : 0;
   };
@@ -438,7 +588,7 @@ async function putTally(env, id, tally) {
 // Entries for /list and /admin/list with KV tallies applied.
 async function entriesWithTallies(issues, env) {
   return Promise.all(
-    (Array.isArray(issues) ? issues : []).map(async (issue) => {
+    (Array.isArray(issues) ? issues : []).map(async issue => {
       const tally = await getTally(env, issue.number, issue);
       return issueToEntry(issue, tally);
     })
@@ -474,7 +624,12 @@ async function invalidateListCache(env) {
 }
 
 async function ensureLabels(token) {
-  for (const [name, color] of [[LABEL, '0e8a16'], ['status:working', '0e8a16'], ['status:blocked', 'b60205'], ['needs-review', 'e99695']]) {
+  for (const [name, color] of [
+    [LABEL, '0e8a16'],
+    ['status:working', '0e8a16'],
+    ['status:blocked', 'b60205'],
+    ['needs-review', 'e99695'],
+  ]) {
     try {
       await gh(`/repos/${OWNER}/${REPO}/labels`, token, {
         method: 'POST',
@@ -509,7 +664,13 @@ function clientIp(request) {
   return 'unknown-' + (h >>> 0).toString(36);
 }
 
-async function checkRateLimit(env, request, cost = 1, keyPrefix = 'rl:', limit = SUBMIT_LIMIT_PER_HOUR) {
+async function checkRateLimit(
+  env,
+  request,
+  cost = 1,
+  keyPrefix = 'rl:',
+  limit = SUBMIT_LIMIT_PER_HOUR
+) {
   // Composite key (IP + UA hash) so header-less direct-worker requests don't
   // share one bucket, and rotating UA alone doesn't mint a fresh IP bucket.
   // Note: KV read-then-write is non-atomic (TOCTOU burst bypass under
@@ -565,14 +726,20 @@ function b64urlDecode(str) {
 
 async function hmacSign(secret, data) {
   const key = await crypto.subtle.importKey(
-    'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
   );
-  return b64urlEncode(new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data))));
+  return b64urlEncode(
+    new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data)))
+  );
 }
 
 async function sha256Hex(text) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function safeEqual(a, b) {
@@ -588,7 +755,9 @@ function adminEnabled(env) {
 
 async function mintAdminToken(env) {
   const payload = b64urlEncode(
-    new TextEncoder().encode(JSON.stringify({ u: env.ADMIN_USER, exp: Date.now() + ADMIN_TOKEN_TTL }))
+    new TextEncoder().encode(
+      JSON.stringify({ u: env.ADMIN_USER, exp: Date.now() + ADMIN_TOKEN_TTL })
+    )
   );
   const sig = await hmacSign(env.ADMIN_SECRET, payload);
   return payload + '.' + sig;
@@ -610,7 +779,12 @@ async function verifyAdminToken(request, env) {
   } catch (err) {
     return null;
   }
-  if (!data || !safeEqual(String(data.u || ''), String(env.ADMIN_USER || '')) || typeof data.exp !== 'number' || Date.now() > data.exp) {
+  if (
+    !data ||
+    !safeEqual(String(data.u || ''), String(env.ADMIN_USER || '')) ||
+    typeof data.exp !== 'number' ||
+    Date.now() > data.exp
+  ) {
     return null;
   }
   return data.u;
@@ -790,7 +964,9 @@ async function proxyLuminBoot(request, url) {
   const query = url.search || '';
   const method = request.method.toUpperCase();
   const body =
-    method === 'GET' || method === 'HEAD' ? undefined : await request.arrayBuffer().catch(() => undefined);
+    method === 'GET' || method === 'HEAD'
+      ? undefined
+      : await request.arrayBuffer().catch(() => undefined);
   // Strip the /lumin/boot proxy prefix so the upstream sees its real path.
   const path = url.pathname.replace(/^\/lumin\/boot\/?/, '/') || '/';
   let lastStatus = 502;
@@ -815,7 +991,10 @@ async function proxyLuminBoot(request, url) {
       }
       // Any HTTP response (even 404 without ?t=) proves the host is alive;
       // only try the next upstream on network abort or 5xx.
-      if (res.ok || (res.status >= 200 && res.status < 500 && res.status !== 403 && res.status !== 451)) {
+      if (
+        res.ok ||
+        (res.status >= 200 && res.status < 500 && res.status !== 403 && res.status !== 451)
+      ) {
         const outHeaders = new Headers(res.headers);
         outHeaders.set('X-Lumin-Upstream', upstream);
         outHeaders.set('Cache-Control', 'no-store');
@@ -833,7 +1012,90 @@ async function proxyLuminBoot(request, url) {
       continue;
     }
   }
-  return jsonOpen({ error: 'All Lumin boot upstreams unreachable.', upstreams: LUMIN_BOOT_UPSTREAMS.length }, lastStatus === 502 ? 502 : lastStatus);
+  return jsonOpen(
+    { error: 'All Lumin boot upstreams unreachable.', upstreams: LUMIN_BOOT_UPSTREAMS.length },
+    lastStatus === 502 ? 502 : lastStatus
+  );
+}
+
+// GET/POST /lumin/x/<origin>/<path...> — generic reverse proxy for any origin.
+// Keeps Lumin SDK game resources (game player pages and their assets, plus
+// third-party assets the game page loads) on the worker origin, which the
+// school network allows even when it filters the original hosts or the /g/ game
+// paths. The fetch happens server-side on Cloudflare, so the school filter
+// never sees the original host. Proxied HTML rewrites absolute URLs to other
+// proxied origins so the whole page stays on the proxy.
+async function proxyLuminGeneric(request, url) {
+  const match = url.pathname.match(/^\/lumin\/x\/(.*)$/);
+  if (!match) return null;
+  const rest = match[1];
+  const slash = rest.indexOf('/');
+  if (slash === -1) {
+    return jsonOpen({ error: 'Generic proxy: missing origin.' }, 400);
+  }
+  const origin = rest.slice(0, slash);
+  const path = rest.slice(slash + 1);
+  if (!LUMIN_PROXY_ORIGINS.includes(origin)) {
+    return jsonOpen({ error: 'Generic proxy: origin not allowed.' }, 403);
+  }
+  try {
+    const target = new URL(`https://${origin}/${path}${url.search || ''}`);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    let res;
+    try {
+      const fwdHeaders = new Headers(request.headers);
+      fwdHeaders.delete('host');
+      fwdHeaders.delete('content-length');
+      res = await fetch(target.toString(), {
+        method: request.method,
+        headers: fwdHeaders,
+        body:
+          request.method === 'GET' || request.method === 'HEAD'
+            ? undefined
+            : await request.arrayBuffer().catch(() => undefined),
+        redirect: 'manual',
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const outHeaders = new Headers(res.headers);
+    outHeaders.set('X-Lumin-Upstream', origin);
+    outHeaders.set('Cache-Control', 'no-store');
+    const cors = luminCorsHeaders();
+    for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
+    let body = res.body;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+      const text = await res.text();
+      const rewritten = rewriteProxyHtml(text);
+      outHeaders.set('content-length', String(new TextEncoder().encode(rewritten).length));
+      outHeaders.delete('content-encoding');
+      body = rewritten;
+    }
+    return new Response(body, { status: res.status, headers: outHeaders });
+  } catch (err) {
+    return jsonOpen({ error: 'Generic proxy upstream unreachable.' }, 502);
+  }
+}
+
+// Rewrite absolute URLs in proxied HTML so the whole page stays on the proxy.
+// https://<origin>/... -> /lumin/x/<origin>/... (and the same for
+// protocol-relative //<origin>/...), so game assets and third-party assets the
+// game page loads are fetched through the proxy instead of direct to hosts the
+// school may filter.
+function rewriteProxyHtml(html) {
+  let out = html;
+  for (const origin of LUMIN_PROXY_ORIGINS) {
+    const re = new RegExp('https?:\\/\\/' + escapeRegExp(origin) + '/', 'g');
+    out = out.replace(re, `/lumin/x/${origin}/`);
+  }
+  return out;
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.+*?^${}()|[\]\\]/g, '\\$&');
 }
 
 export default {
@@ -879,6 +1141,9 @@ export default {
     if (url.pathname === '/lumin/boot' || url.pathname.startsWith('/lumin/boot/')) {
       return proxyLuminBoot(request, url);
     }
+    if (url.pathname === '/lumin/x' || url.pathname.startsWith('/lumin/x/')) {
+      return proxyLuminGeneric(request, url);
+    }
 
     const token = env.GITHUB_TOKEN;
     if (!token) return json({ error: 'Server misconfigured: GITHUB_TOKEN missing.' }, 500);
@@ -893,7 +1158,11 @@ export default {
           return json({ error: 'Rate limit exceeded. Try again later.' }, 429);
         }
         const mode = await getMode(env);
-        if (mode === 'off') return json({ entries: [], mode, disabled: true, notice: publicNotice(await getNotice(env)) }, 503);
+        if (mode === 'off')
+          return json(
+            { entries: [], mode, disabled: true, notice: publicNotice(await getNotice(env)) },
+            503
+          );
         const issues = await listIssues(token, true, env);
         const entries = await entriesWithTallies(issues.slice(0, MAX_ITEMS), env);
         return json({ entries, mode, notice: publicNotice(await getNotice(env)) });
@@ -930,7 +1199,9 @@ export default {
             ? payload.description.trim().slice(0, DESCRIPTION_MAX_LEN)
             : '';
         // Optional tile icon category (ai | games | media, else no icon).
-        const category = parseCategory(typeof payload.category === 'string' ? payload.category.trim() : '');
+        const category = parseCategory(
+          typeof payload.category === 'string' ? payload.category.trim() : ''
+        );
 
         // Content safety: static adult/binary denylists, then live Safe
         // Browsing screen (when a key is configured).
@@ -948,7 +1219,7 @@ export default {
         }
         const duplicate = issues
           .map(issueToEntry)
-          .find((e) => canonicalUrl(e.url) === canonicalUrl(siteUrl));
+          .find(e => canonicalUrl(e.url) === canonicalUrl(siteUrl));
         if (duplicate) return json({ error: 'URL already listed.', entry: duplicate }, 409);
 
         let hostname = siteUrl;
@@ -961,7 +1232,17 @@ export default {
             method: 'POST',
             body: JSON.stringify({
               title: 'Site: ' + hostname,
-              body: 'URL: ' + siteUrl + '\nDescription: ' + description + '\nCategory: ' + category + '\nStatus: ' + status + '\nSubmitted: ' + new Date().toISOString(),
+              body:
+                'URL: ' +
+                siteUrl +
+                '\nDescription: ' +
+                description +
+                '\nCategory: ' +
+                category +
+                '\nStatus: ' +
+                status +
+                '\nSubmitted: ' +
+                new Date().toISOString(),
               labels: [LABEL, 'status:' + status],
             }),
           });
@@ -991,7 +1272,8 @@ export default {
         const id = parseInt(payload.id, 10);
         const status = parseStatus(payload.status);
         if (!Number.isInteger(id) || id <= 0) return json({ error: 'Invalid issue id.' }, 400);
-        if (status !== 'blocked') return json({ error: "Public reports may only flag 'blocked'." }, 400);
+        if (status !== 'blocked')
+          return json({ error: "Public reports may only flag 'blocked'." }, 400);
 
         await ensureLabels(token);
         let updated;
@@ -1046,7 +1328,7 @@ export default {
           if (err.upstream === 404) return json({ error: 'Issue not found.' }, 404);
           return json({ error: 'Upstream request failed.' }, 502);
         }
-        const issueLabels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+        const issueLabels = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
         if (!issueLabels.includes(LABEL)) return json({ error: 'Not a marketplace entry.' }, 404);
         if (issue.state === 'closed') return json({ error: 'This entry was removed.' }, 410);
 
@@ -1057,7 +1339,7 @@ export default {
         const voterId = parseVoterId(payload.voter);
         const scope = voterId ? 'vid:' + voterId : ip;
         const voteKey = 'vote:' + scope + ':' + id;
-        const reactKey = (t) => 'react:' + scope + ':' + id + ':' + t;
+        const reactKey = t => 'react:' + scope + ':' + id + ':' + t;
         let current = null;
         try {
           current = await env.RL.get(voteKey);
@@ -1134,7 +1416,8 @@ export default {
           return json({ error: 'Invalid JSON body.' }, 400);
         }
         const id = parseInt(payload.id, 10);
-        const reason = typeof payload.reason === 'string' ? payload.reason.trim().slice(0, 500) : '';
+        const reason =
+          typeof payload.reason === 'string' ? payload.reason.trim().slice(0, 500) : '';
         if (!Number.isInteger(id) || id <= 0) return json({ error: 'Invalid issue id.' }, 400);
 
         const ip = clientIp(request);
@@ -1153,7 +1436,7 @@ export default {
           if (err.upstream === 404) return json({ error: 'Issue not found.' }, 404);
           return json({ error: 'Upstream request failed.' }, 502);
         }
-        const currentLabels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+        const currentLabels = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
         if (!currentLabels.includes(LABEL)) return json({ error: 'Not a marketplace entry.' }, 404);
         const nextLabels = currentLabels.includes('needs-review')
           ? currentLabels
@@ -1170,7 +1453,11 @@ export default {
         await gh(`/repos/${OWNER}/${REPO}/issues/${id}/comments`, token, {
           method: 'POST',
           body: JSON.stringify({
-            body: '🚩 Reported for manual review.\nReason: ' + (reason || '(no reason given)') + '\nReported: ' + new Date().toISOString(),
+            body:
+              '🚩 Reported for manual review.\nReason: ' +
+              (reason || '(no reason given)') +
+              '\nReported: ' +
+              new Date().toISOString(),
           }),
         });
         try {
@@ -1230,7 +1517,10 @@ export default {
         url.pathname === '/admin/notice' ||
         url.pathname === '/admin/mode';
       if (needsAdmin && !adminUser) {
-        return json({ error: adminEnabled(env) ? 'Admin login required.' : 'Admin panel is not configured.' }, 401);
+        return json(
+          { error: adminEnabled(env) ? 'Admin login required.' : 'Admin panel is not configured.' },
+          401
+        );
       }
 
       // GET /admin/list — every marketplace issue incl. closed (for restore).
@@ -1250,10 +1540,11 @@ export default {
       // GET /admin/reports — open issues flagged needs-review.
       if (url.pathname === '/admin/reports' && request.method === 'GET') {
         const issues = await listIssues(token, false, env);
-        const flagged = issues
-          .filter((issue) =>
-            (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name)).includes('needs-review')
-          );
+        const flagged = issues.filter(issue =>
+          (issue.labels || [])
+            .map(l => (typeof l === 'string' ? l : l.name))
+            .includes('needs-review')
+        );
         return json({ entries: await entriesWithTallies(flagged, env) });
       }
 
@@ -1277,9 +1568,9 @@ export default {
           if (err.upstream === 404) return json({ error: 'Issue not found.' }, 404);
           return json({ error: 'Upstream request failed.' }, 502);
         }
-        const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
+        const labels = (issue.labels || []).map(l => (typeof l === 'string' ? l : l.name));
         if (!labels.includes(LABEL)) return json({ error: 'Not a marketplace entry.' }, 404);
-        const next = labels.filter((l) => l !== 'status:working' && l !== 'status:blocked');
+        const next = labels.filter(l => l !== 'status:working' && l !== 'status:blocked');
         next.push(LABEL, 'status:' + status);
         let updated;
         try {
@@ -1323,7 +1614,11 @@ export default {
         }
         await gh(`/repos/${OWNER}/${REPO}/issues/${id}/comments`, token, {
           method: 'POST',
-          body: JSON.stringify({ body: reopen ? 'Admin (' + adminUser + ') reopened this entry.' : 'Admin (' + adminUser + ') removed this entry.' }),
+          body: JSON.stringify({
+            body: reopen
+              ? 'Admin (' + adminUser + ') reopened this entry.'
+              : 'Admin (' + adminUser + ') removed this entry.',
+          }),
         });
         await invalidateListCache(env);
         return json({ ok: true, closed: updated.state === 'closed' });
@@ -1347,8 +1642,8 @@ export default {
           return json({ error: 'Upstream request failed.' }, 502);
         }
         const labels = (issue.labels || [])
-          .map((l) => (typeof l === 'string' ? l : l.name))
-          .filter((l) => l !== 'needs-review');
+          .map(l => (typeof l === 'string' ? l : l.name))
+          .filter(l => l !== 'needs-review');
         await gh(`/repos/${OWNER}/${REPO}/issues/${id}`, token, {
           method: 'PATCH',
           body: JSON.stringify({ labels }),
@@ -1376,7 +1671,8 @@ export default {
         } catch (err) {
           return json({ error: 'Invalid JSON body.' }, 400);
         }
-        const text = typeof payload.text === 'string' ? payload.text.trim().slice(0, NOTICE_MAX_LEN) : '';
+        const text =
+          typeof payload.text === 'string' ? payload.text.trim().slice(0, NOTICE_MAX_LEN) : '';
         const visible = payload.visible === true && text.length > 0;
         const notice = { text, visible, updatedAt: Date.now() };
         try {

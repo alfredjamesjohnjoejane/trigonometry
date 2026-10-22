@@ -178,6 +178,26 @@ export const LUMIN_HANDSHAKE_ORIGINS: string[] = [
 // worker file in (version-independent, so it survives deploys).
 export const LUMIN_CACHE_NAME = 'jesherhead-lumin-v1';
 
+// Origins the Lumin game player loads resources from (game player pages, their
+// assets, and third-party assets such as the Ruffle Flash emulator). A school
+// filter may block any of these origins or the /g/ game paths. Every resource
+// is proxied through the worker (allowed on school WiFi) via
+// /lumin/x/<origin>/<path>, so the game keeps working even when the original
+// hosts or paths are filtered. Origins are stored without the scheme; the
+// proxy fetches over https:// and proxied HTML rewrites absolute URLs so the
+// whole page stays on the proxy.
+export const LUMIN_PROXY_ORIGINS: string[] = [
+  'a.luminsdk.com',
+  'drkesten.com',
+  'milpagan.org',
+  'catholicrebuttals.com',
+  'instructure-ramen.hpsschools.org',
+  'unpkg.com',
+  'cdn.r9x.in',
+  'www.googletagmanager.com',
+  'code.jquery.com',
+];
+
 // Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
 // Probed by diagnostics only — not part of the games-online ping, since the
 // catalog can be browsable while Lumin init is blocked.

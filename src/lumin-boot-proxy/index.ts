@@ -1,6 +1,12 @@
-import { LUMIN_BACKEND_TARGETS, LUMIN_WORKER_BOOT_URL } from '../types/index.js';
+import {
+  LUMIN_BACKEND_TARGETS,
+  LUMIN_WORKER_BOOT_URL,
+  LUMIN_WORKER_ORIGIN,
+} from '../types/index.js';
+import { LUMIN_PROXY_ORIGINS } from '../types/index.js';
 
 const INSTALLED_FLAG = '__luminBootProxyInstalled';
+const URL_REWRITE_FLAG = '__luminUrlRewriteInstalled';
 
 function bootHostnames(): Set<string> {
   const hosts = new Set<string>();
@@ -262,6 +268,121 @@ export function installLuminHandshakeShim(): boolean {
   }
 }
 
+/** Rewrite an absolute URL on a proxied origin to /lumin/x/<origin>/<path>. */
+function toProxyUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (!LUMIN_PROXY_ORIGINS.includes(u.hostname.toLowerCase())) return null;
+    return `${LUMIN_WORKER_ORIGIN}/lumin/x/${u.hostname.toLowerCase()}${u.pathname}${u.search || ''}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Rewrite Lumin game URLs to the worker proxy so every resource the game
+ * player loads stays on the single origin the school allows.
+ *
+ * The SDK creates the game as a cross-origin iframe
+ * (`<domain>/g/<session>/<game>/`) and navigates/loads game assets from the
+ * Lumin domains. A school filter may block those origins or the /g/ game
+ * paths even while /api/v1/boot stays reachable. Rewriting iframe src,
+ * location navigations and window.open targets to
+ * /lumin/x/<origin>/<path> routes every resource through the worker proxy
+ * (server-side fetch on Cloudflare, so the school filter never sees the
+ * original host). Proxied HTML rewrites absolute URLs on the proxy too, so
+ * the game's subresources stay on the proxy as well.
+ */
+export function installLuminUrlRewrite(): boolean {
+  try {
+    const w = window as unknown as Record<string, unknown>;
+    if (w[URL_REWRITE_FLAG] === true) return true;
+
+    const proto = window.HTMLIFrameElement?.prototype;
+    if (proto) {
+      const desc = Object.getOwnPropertyDescriptor(proto, 'src');
+      if (desc?.get && desc?.set) {
+        const descSet = desc.set;
+        Object.defineProperty(proto, 'src', {
+          configurable: true,
+          enumerable: desc.enumerable,
+          get(this: HTMLIFrameElement): string {
+            return desc.get!.call(this);
+          },
+          set(this: HTMLIFrameElement, value: string) {
+            const u = luminHandshakeUrl(value);
+            if (u) {
+              // Handshake page: answer locally (same as installLuminHandshakeShim).
+              descSet.call(this, handshakeBlobUrl(u));
+              deliverHandshakeMessage(u, this);
+              return;
+            }
+            const rewritten = toProxyUrl(value);
+            descSet.call(this, rewritten != null ? rewritten : value);
+          },
+        });
+      }
+      // Some code paths use setAttribute('src', ...) instead of the property.
+      const origSetAttribute = proto.setAttribute;
+      proto.setAttribute = function (this: HTMLIFrameElement, name: string, value: string) {
+        if (String(name).toLowerCase() === 'src') {
+          const u = luminHandshakeUrl(String(value));
+          if (u) {
+            origSetAttribute.call(this, 'src', handshakeBlobUrl(u));
+            deliverHandshakeMessage(u, this);
+            return;
+          }
+          const rewritten = toProxyUrl(String(value));
+          if (rewritten) {
+            origSetAttribute.call(this, 'src', rewritten);
+            return;
+          }
+        }
+        return origSetAttribute.call(this, name, value);
+      } as typeof proto.setAttribute;
+    }
+
+    // location.href = ... and location.assign/replace.
+    const locProto = Location.prototype;
+    const hrefDesc = Object.getOwnPropertyDescriptor(locProto, 'href');
+    if (hrefDesc?.set) {
+      Object.defineProperty(locProto, 'href', {
+        configurable: true,
+        enumerable: hrefDesc.enumerable,
+        get: hrefDesc.get,
+        set(this: Location, v: string) {
+          const rewritten = toProxyUrl(v);
+          hrefDesc.set!.call(this, rewritten != null ? rewritten : v);
+        },
+      });
+    }
+    const locAssign = Location.prototype.assign;
+    Location.prototype.assign = function (this: Location, v: string) {
+      const rewritten = toProxyUrl(v);
+      locAssign.call(this, rewritten != null ? rewritten : v);
+    };
+    const locReplace = Location.prototype.replace;
+    Location.prototype.replace = function (this: Location, v: string) {
+      const rewritten = toProxyUrl(v);
+      locReplace.call(this, rewritten != null ? rewritten : v);
+    };
+
+    // window.open.
+    const origOpen = w.open;
+    if (typeof origOpen === 'function') {
+      w.open = function (this: Window, url?: string, target?: string, features?: string) {
+        const rewritten = toProxyUrl(url ?? '');
+        return origOpen.call(w, rewritten != null ? rewritten : url, target, features);
+      };
+    }
+
+    w[URL_REWRITE_FLAG] = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function extractUrl(input: RequestInfo | URL): string | null {
   try {
     if (typeof input === 'string') return input;
@@ -322,6 +443,14 @@ export function installLuminBootProxy(): boolean {
     // cannot help them, so the iframe src is answered locally.
     try {
       installLuminHandshakeShim();
+    } catch {
+      /* best-effort */
+    }
+    // Rewrite Lumin game URLs (iframe srcs, location navigations,
+    // window.open targets) to the worker proxy so game resources never hit
+    // potentially-filtered origins directly.
+    try {
+      installLuminUrlRewrite();
     } catch {
       /* best-effort */
     }
