@@ -5,15 +5,18 @@ import {
   installLuminWorkerProxy,
   _uninstallLuminWorkerProxy,
 } from './index.js';
+import { _resetLuminStore, saveLuminWorkerFile } from '../lumin-store/index.js';
 import { LUMIN_WORKER_PROXY_URL } from '../types/index.js';
 
 beforeEach(() => {
   _uninstallLuminWorkerProxy();
+  _resetLuminStore();
   vi.unstubAllGlobals();
 });
 
 afterEach(() => {
   _uninstallLuminWorkerProxy();
+  _resetLuminStore();
   vi.unstubAllGlobals();
 });
 
@@ -114,6 +117,31 @@ describe('installLuminWorkerProxy', () => {
     installLuminWorkerProxy();
     await window.fetch('https://a.luminsdk.com/api/v1/boot?t=1');
     expect(calls).toEqual(['https://a.luminsdk.com/api/v1/boot?t=1']);
+  });
+
+  it('serves the last known-good worker file when every host is blocked', async () => {
+    // The worker file is the request that dies with "domain fetch failed"
+    // on filtered school WiFi. A copy that worked once is enough to boot
+    // the SDK offline.
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    const code = `/*cached worker*/${'x'.repeat(25000)}`;
+    await saveLuminWorkerFile('https://a.luminsdk.com/v1/lumin.worker.js', code);
+    installLuminWorkerProxy();
+    const res = await window.fetch('https://a.luminsdk.com/v1/lumin.worker.js');
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe(code);
+    expect(res.headers.get('X-Lumin-Offline-Copy')).toBe('1');
+  });
+
+  it('answers 504 when no host is reachable and nothing was cached', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    installLuminWorkerProxy();
+    const res = await window.fetch('https://a.luminsdk.com/v1/lumin.worker.js');
+    expect(res.status).toBe(504);
   });
 });
 

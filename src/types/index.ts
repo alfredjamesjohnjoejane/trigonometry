@@ -174,6 +174,10 @@ export const LUMIN_HANDSHAKE_ORIGINS: string[] = [
   'https://milpagan.org',
 ];
 
+// Cache Storage bucket the service worker keeps the Lumin SDK script and its
+// worker file in (version-independent, so it survives deploys).
+export const LUMIN_CACHE_NAME = 'jesherhead-lumin-v1';
+
 // Lumin backend boot hosts (decoded from the stub; all serve identical JSON).
 // Probed by diagnostics only — not part of the games-online ping, since the
 // catalog can be browsable while Lumin init is blocked.

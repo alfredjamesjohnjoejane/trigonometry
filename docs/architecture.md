@@ -121,6 +121,26 @@ The SDK also needs a *domain handshake* before it can start: it loads
 That request bypasses every fetch proxy in the page, so the diagnostics
 battery probes it directly ("Lumin domain handshake" row).
 
+The handshake pages carry no data — they only post a message — so
+`src/lumin-boot-proxy` answers them from the page:
+
+- The `fetch` of a handshake document falls back to a local copy when the
+  network cannot deliver it.
+- The **iframe** src is rewritten to a `blob:` URL, and the page posts the
+  message itself as a synthetic `MessageEvent` with the Lumin *origin* (a
+  blob frame inherits the page's origin, and the SDK rejects that).
+
+Without this, a school filter that blocks the Lumin hosts fails the
+handshake, the SDK gives up on every domain and the init rejects with
+"Worker connection failed: domain fetch failed" — even though the boot API
+and the worker file are reachable.
+
+The SDK's worker file (`/v1/lumin.worker.js`) is the other request that
+dies with the same error. It is routed through the worker proxy
+(`/lumin/worker`), kept as a last-good copy in IndexedDB and in the
+service worker's cache, so a copy that worked once is enough to boot the
+SDK offline.
+
 ## Boot Sequence
 
 The application boots in a specific order to ensure security and functionality:

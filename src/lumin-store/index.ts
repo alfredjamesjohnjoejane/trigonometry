@@ -2,6 +2,8 @@ const DB_NAME = 'jesherhead_lumin';
 const DB_VERSION = 1;
 const STORE = 'scripts';
 const ROW_KEY = 'latest-good';
+/** Second row: the last known-good copy of the SDK's worker file. */
+const WORKER_ROW_KEY = 'latest-worker';
 
 export interface StoredLuminScript {
   url: string;
@@ -119,4 +121,60 @@ export async function getLuminScript(): Promise<StoredLuminScript | null> {
   });
   if (fromDb) return fromDb;
   return mem ?? null;
+}
+
+/**
+ * Remember the SDK's worker file (/v1/lumin.worker.js).
+ *
+ * Lumin.init fetches this file before it can start its Worker, and the
+ * request is the one that dies with "domain fetch failed" when a school
+ * filter blocks the Lumin hosts. The file changes rarely, so a copy that
+ * worked once is enough to boot the SDK offline.
+ */
+export async function saveLuminWorkerFile(url: string, code: string): Promise<void> {
+  if (typeof code !== 'string' || code.length < 20000) return;
+  const row: StoredLuminScript = { url, code, savedAt: Date.now() };
+  const database = await openDb().catch(() => null);
+  if (!database) {
+    memory.set(WORKER_ROW_KEY, row);
+    return;
+  }
+  await new Promise<void>(resolve => {
+    try {
+      const tx = database.transaction([STORE], 'readwrite');
+      tx.onerror = () => resolve();
+      const store = tx.objectStore(STORE);
+      const put = store.put({ id: WORKER_ROW_KEY, ...row });
+      put.onsuccess = () => resolve();
+      put.onerror = () => resolve();
+    } catch {
+      memory.set(WORKER_ROW_KEY, row);
+      resolve();
+    }
+  });
+}
+
+/** Last known-good copy of the worker file, or null. */
+export async function getLuminWorkerFile(): Promise<StoredLuminScript | null> {
+  const mem = memory.get(WORKER_ROW_KEY);
+  const database = await openDb().catch(() => null);
+  if (!database) return mem ?? null;
+  const fromDb = await new Promise<StoredLuminScript | null>(resolve => {
+    try {
+      const tx = database.transaction([STORE], 'readonly');
+      tx.onerror = () => resolve(null);
+      const store = tx.objectStore(STORE);
+      const get = store.get(WORKER_ROW_KEY);
+      get.onsuccess = () => {
+        const v = get.result as (StoredLuminScript & { id?: string }) | undefined;
+        if (v && typeof v.code === 'string') {
+          resolve({ url: v.url, code: v.code, savedAt: v.savedAt });
+        } else resolve(null);
+      };
+      get.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return fromDb ?? mem ?? null;
 }

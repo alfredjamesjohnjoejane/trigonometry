@@ -82,28 +82,26 @@ function staticAssets() {
     'icons/icon-192x192-maskable.png',
     'icons/icon-512x512-maskable.png',
     'vendor/lumin.min.js',
-  ].map((p) => base + p);
+  ].map(p => base + p);
 }
 
 const MAX_CACHE_ENTRIES = 500;
 const MAX_IMAGE_CACHE_ENTRIES = 1000;
 const CACHE_MAX_AGE = 1000 * 60 * 60 * 24 * 30;
 
-const GAME_IMAGE_ORIGINS = [
-  'iili.io',
-  'cdn.jsdelivr.net'
-];
+const GAME_IMAGE_ORIGINS = ['iili.io', 'cdn.jsdelivr.net'];
 
-self.addEventListener('install', (event) => {
+self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then((cache) => {
+    caches
+      .open(CACHE_NAME)
+      .then(cache => {
         console.log('[SW] Caching static assets');
         // Per-asset add: one 404 must not fail the whole install (the old
         // cache.addAll rejected entirely when any single asset was missing).
         return Promise.allSettled(
-          staticAssets().map((url) =>
-            cache.add(url).catch((err) => console.warn('[SW] Precache skipped:', url))
+          staticAssets().map(url =>
+            cache.add(url).catch(err => console.warn('[SW] Precache skipped:', url))
           )
         );
       })
@@ -111,22 +109,19 @@ self.addEventListener('install', (event) => {
       .then(() => {
         // Best-effort warm of the version-independent Lumin cache: a student
         // who installs on filtered WiFi still gets the vendor copy via the
-        // precache above; warming one CDN/worker copy here means the next
-        // visit can serve stale-while-revalidate instantly. Never fails install.
-        // The /lumin/worker file is warmed too: Lumin.init needs it before it
-        // can create its Worker, and its path is filtered on some school WiFi.
+        // precache above; warming every CDN/worker copy here means the next
+        // visit can serve stale-while-revalidate instantly — and gives the
+        // SDK a usable worker file even when every Lumin host is blocked
+        // (that request is the one that fails with "domain fetch failed").
+        // Never fails install.
         try {
-          return caches.open(LUMIN_CACHE_NAME).then((luminCache) =>
+          return caches.open(LUMIN_CACHE_NAME).then(luminCache =>
             Promise.allSettled(
-              [...LUMIN_SCRIPT_URLS.slice(0, 2), ...LUMIN_WORKER_URLS.slice(0, 1)].map((u) =>
-                fetch(u)
-                  .then((res) => {
+              [...LUMIN_SCRIPT_URLS, ...LUMIN_WORKER_URLS].map(u =>
+                fetch(u, { cache: 'no-store' })
+                  .then(res => {
                     if (!res.ok) return;
-                    const toCache = new Response(res.clone().body, {
-                      status: res.status,
-                      statusText: res.statusText,
-                      headers: new Headers(res.headers),
-                    });
+                    const toCache = luminCacheableResponse(res);
                     toCache.headers.set('sw-cache-date', Date.now().toString());
                     return luminCache.put(u, toCache).catch(() => {});
                   })
@@ -145,16 +140,19 @@ self.addEventListener('install', (event) => {
   );
 });
 
-self.addEventListener('activate', (event) => {
+self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then((cacheNames) => {
+    caches
+      .keys()
+      .then(cacheNames => {
         return Promise.all(
           cacheNames
             // LUMIN_CACHE_NAME is version-independent on purpose (see above)
             // and must survive deploys — only the rotating caches are purged.
-            .filter((name) => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME && name !== LUMIN_CACHE_NAME)
-            .map((name) => {
+            .filter(
+              name => name !== CACHE_NAME && name !== IMAGE_CACHE_NAME && name !== LUMIN_CACHE_NAME
+            )
+            .map(name => {
               console.log('[SW] Deleting old cache:', name);
               return caches.delete(name);
             })
@@ -172,7 +170,7 @@ async function cleanupCache(cacheName, maxEntries) {
   const now = Date.now();
 
   const entriesWithTime = await Promise.all(
-    keys.map(async (request) => {
+    keys.map(async request => {
       const response = await cache.match(request);
       // Entry may have been deleted between keys() and match().
       if (!response) return null;
@@ -184,9 +182,7 @@ async function cleanupCache(cacheName, maxEntries) {
 
   entriesWithTime.sort((a, b) => a.cachedTime - b.cachedTime);
 
-  const expiredEntries = entriesWithTime.filter(
-    (entry) => now - entry.cachedTime > CACHE_MAX_AGE
-  );
+  const expiredEntries = entriesWithTime.filter(entry => now - entry.cachedTime > CACHE_MAX_AGE);
 
   const excessEntries = entriesWithTime.slice(0, Math.max(0, entriesWithTime.length - maxEntries));
 
@@ -198,7 +194,7 @@ async function cleanupCache(cacheName, maxEntries) {
   }
 }
 
-self.addEventListener('fetch', (event) => {
+self.addEventListener('fetch', event => {
   const { request } = event;
   const url = new URL(request.url);
 
@@ -206,8 +202,12 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  const isGameImage = GAME_IMAGE_ORIGINS.some(origin => url.hostname === origin || url.hostname.endsWith('.' + origin)) && 
-    (url.pathname.match(/\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i) || url.pathname.includes('/media/'));
+  const isGameImage =
+    GAME_IMAGE_ORIGINS.some(
+      origin => url.hostname === origin || url.hostname.endsWith('.' + origin)
+    ) &&
+    (url.pathname.match(/\.(jpg|jpeg|png|webp|gif|avif)(\?.*)?$/i) ||
+      url.pathname.includes('/media/'));
 
   if (isGameImage) {
     event.respondWith(imageCacheFirst(request));
@@ -224,6 +224,23 @@ self.addEventListener('fetch', (event) => {
   const luminKey = luminCacheKeyFor(url.href);
   if (luminKey) {
     event.respondWith(luminStaleWhileRevalidate(request, luminKey));
+    return;
+  }
+
+  // The SDK's domain handshake. Before Lumin.init can start, the SDK proves
+  // that a backend domain is usable by loading /g/_iframe_probe in a hidden
+  // iframe and waiting for a postMessage, then does the same with a
+  // /g/<session>/__lumin_canary/ page. A school filter that blocks those
+  // paths (they are the only document requests the SDK makes) kills the init
+  // with "Worker connection failed: domain fetch failed" while every fetch
+  // probe stays green.
+  //
+  // The real pages are tiny and only post a message, so the worker answers
+  // them itself when the network does not deliver a usable one. The answer
+  // is the same message the upstream page sends, so the SDK cannot tell the
+  // difference — the game data itself still comes from the real API.
+  if (isLuminHandshakePath(url)) {
+    event.respondWith(luminHandshakeResponse(request, url));
     return;
   }
 
@@ -250,7 +267,9 @@ self.addEventListener('fetch', (event) => {
   ];
   const isMutable =
     url.pathname === basePath ||
-    mutableSuffixes.some((suffix) => url.pathname.endsWith('/' + suffix) || url.pathname === basePath + suffix);
+    mutableSuffixes.some(
+      suffix => url.pathname.endsWith('/' + suffix) || url.pathname === basePath + suffix
+    );
   if (isMutable || request.destination === 'document') {
     event.respondWith(networkFirstWithOfflineFallback(request));
     return;
@@ -284,11 +303,7 @@ async function luminStaleWhileRevalidate(request, cacheKey) {
       // Only cache real script bytes: opaque failures and error pages must
       // never poison the cache, or the school block persists after it lifts.
       if (response.ok && (response.type === 'cors' || response.type === 'basic')) {
-        const toCache = new Response(response.clone().body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: new Headers(response.headers),
-        });
+        const toCache = luminCacheableResponse(response);
         toCache.headers.set('sw-cache-date', Date.now().toString());
         await cache.put(key, toCache).catch(() => {});
       }
@@ -309,6 +324,88 @@ async function luminStaleWhileRevalidate(request, cacheKey) {
   return new Response('', { status: 503, statusText: 'Service Unavailable' });
 }
 
+// Re-wrap a response for caching.
+//
+// The body handed over by `response.clone().body` is already DECODED, but the
+// original headers still carry `content-encoding` (br/gzip) and the encoded
+// `content-length`. Keeping them makes the stored entry inconsistent: the
+// browser tries to decode an uncompressed body again, the fetch fails, and
+// Lumin.init dies with "domain fetch failed" even though the network was
+// fine. Drop both headers and let the browser frame the body itself.
+function luminCacheableResponse(response) {
+  const headers = new Headers(response.headers);
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  return new Response(response.clone().body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+// --- SDK domain handshake ---------------------------------------------------
+
+// Hosts that serve the SDK's backend. Only these get the handshake answer —
+// the page never answers for anyone else.
+const LUMIN_HANDSHAKE_HOSTS = [
+  'a.luminsdk.com',
+  'drkesten.com',
+  'milpagan.org',
+  'catholicrebuttals.com',
+  'instructure-ramen.hpsschools.org',
+];
+
+// The two handshake documents the SDK loads:
+//   /g/_iframe_probe                       -> posts "lumin-ok-frame"
+//   /g/<session>/__lumin_canary/?__lp=<n>  -> posts {__lumin:'frame-ok',...}
+function isLuminHandshakePath(url) {
+  if (!LUMIN_HANDSHAKE_HOSTS.includes(url.hostname)) return false;
+  if (!url.pathname.startsWith('/g/')) return false;
+  return url.pathname === '/g/_iframe_probe' || url.pathname.endsWith('/__lumin_canary/');
+}
+
+function luminHandshakeHtml(url) {
+  const nonce = url.searchParams.get('__lp') || '';
+  const canary = url.pathname.endsWith('/__lumin_canary/');
+  if (canary) {
+    return (
+      '<!doctype html><meta charset=utf-8><title>lumin</title><script>' +
+      'try{parent.postMessage({__lumin:"frame-ok",game:"__lumin_canary",nonce:' +
+      JSON.stringify(nonce) +
+      '},"*")}catch(e){}</script>'
+    );
+  }
+  return (
+    '<!doctype html><meta charset=utf-8><title>lumin</title><script>' +
+    'try{parent.postMessage("lumin-ok-frame","*")}catch(e){}</script>'
+  );
+}
+
+// Network-first: use the real page when it works, answer it ourselves when
+// the filter killed it (error status, filter page, or no network at all).
+async function luminHandshakeResponse(request, url) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const text = await response.clone().text();
+      const wantsMessage = url.pathname.endsWith('/__lumin_canary/')
+        ? text.includes('frame-ok')
+        : text.includes('lumin-ok-frame');
+      if (wantsMessage) return response;
+    }
+  } catch (err) {
+    // fall through to the local answer
+  }
+  return new Response(luminHandshakeHtml(url), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Lumin-Handshake': 'local',
+    },
+  });
+}
+
 async function imageCacheFirst(request) {
   const cache = await caches.open(IMAGE_CACHE_NAME);
   const cached = await cache.match(request);
@@ -321,7 +418,7 @@ async function imageCacheFirst(request) {
       const responseToCache = new Response(response.clone().body, {
         status: response.status,
         statusText: response.statusText,
-        headers: new Headers(response.headers)
+        headers: new Headers(response.headers),
       });
       responseToCache.headers.set('sw-cache-date', Date.now().toString());
       // Await the put so worker shutdown can't silently drop the write.
@@ -345,7 +442,7 @@ async function cacheFirst(request) {
       const responseToCache = new Response(response.clone().body, {
         status: response.status,
         statusText: response.statusText,
-        headers: new Headers(response.headers)
+        headers: new Headers(response.headers),
       });
       responseToCache.headers.set('sw-cache-date', Date.now().toString());
       await cache.put(request, responseToCache).catch(() => {});
@@ -366,7 +463,7 @@ async function networkFirstWithOfflineFallback(request) {
       const responseToCache = new Response(response.clone().body, {
         status: response.status,
         statusText: response.statusText,
-        headers: new Headers(response.headers)
+        headers: new Headers(response.headers),
       });
       responseToCache.headers.set('sw-cache-date', Date.now().toString());
       await cache.put(request, responseToCache).catch(() => {});
@@ -385,7 +482,7 @@ async function networkFirstWithOfflineFallback(request) {
   }
 }
 
-self.addEventListener('message', (event) => {
+self.addEventListener('message', event => {
   const data = event.data;
   if (data === 'skipWaiting' || (data && data.type === 'SKIP_WAITING')) {
     self.skipWaiting();

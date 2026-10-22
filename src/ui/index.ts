@@ -799,7 +799,11 @@ function initHomepageTest(): void {
   installLogCapture();
   installDiagGlobals();
   let failureShown = false;
-  const fail = (rawErr?: unknown, mirrorAttempts: LuminMirrorAttempt[] = []) => {
+  const fail = (
+    rawErr?: unknown,
+    mirrorAttempts: LuminMirrorAttempt[] = [],
+    initDetail?: { error?: unknown; urls?: string[]; ms?: number }
+  ) => {
     // Only one failure screen: the init failure and the "all mirrors
     // exhausted" path can both fire, and rebuilding the UI would drop the
     // catalog fallback that is already on screen.
@@ -807,6 +811,13 @@ function initHomepageTest(): void {
     failureShown = true;
     mount.dataset.ready = '0';
     mount.textContent = '';
+    // The SDK's own rejection is the interesting part: "domain fetch failed"
+    // means the backend/worker fetch failed, anything else points at the
+    // domain handshake or the eval step. Keep it verbatim in the report.
+    const sdkError = initDetail?.error;
+    const sdkErrorText = sdkError ? describeError(sdkError) : '';
+    const initUrls = initDetail?.urls ?? [];
+    const initMs = initDetail?.ms;
     const errText = rawErr === undefined ? '' : describeError(rawErr);
     const mirrorText = mirrorAttempts.length
       ? `\nMirror attempts:\n${formatMirrorAttempts(mirrorAttempts)}`
@@ -836,10 +847,11 @@ function initHomepageTest(): void {
           present: env.luminGlobal !== 'missing',
           initType: env.luminGlobal,
           ok: false,
-          errorName: errName || null,
-          errorMessage: combinedErrText.slice(0, 800) || null,
-          ms: null,
-          luminFetchUrls: [],
+          errorName: sdkError instanceof Error ? sdkError.name : errName || null,
+          errorMessage:
+            (sdkErrorText ? `${sdkErrorText}\n` : '') + combinedErrText.slice(0, 800) || null,
+          ms: initMs ?? null,
+          luminFetchUrls: initUrls,
         },
         recentLogs: mirrorAttempts.length
           ? mirrorAttempts.map(
@@ -847,7 +859,7 @@ function initHomepageTest(): void {
                 `[mirror] ${a.ok ? 'OK' : 'FAIL'} [${a.tier}] ${a.ms ?? '?'}ms ${a.url} ${a.errorName ?? ''} ${(a.errorMessage ?? '').slice(0, 160)}`
             )
           : [],
-        likelyCause: `Homepage mount failed [${classification}] after ${mirrorAttempts.length || 1} load attempt(s). Press "Diagnose connection" on school WiFi for the full probe battery.`,
+        likelyCause: `Homepage mount failed [${classification}] after ${mirrorAttempts.length || 1} load attempt(s).${sdkErrorText ? ` SDK error: ${sdkErrorText.slice(0, 200)}` : ''} Press "Diagnose connection" on school WiFi for the full probe battery.`,
         checklist: [
           'Press "🔍 Diagnose connection" below while still on the school network.',
           'Press "📋 Copy report" in the panel and save it — the failure code ties the two together.',
@@ -860,6 +872,9 @@ function initHomepageTest(): void {
     try {
       console.error('[HomepageTest] failed:', {
         error: errText || '(no detail — script onerror or init never resolved)',
+        sdkError: sdkErrorText || '(none)',
+        initMs: initMs ?? null,
+        initUrls,
         classification,
         failureCode,
         online: navigator.onLine,
@@ -891,8 +906,13 @@ function initHomepageTest(): void {
       }
     })();
     detail.textContent =
-      (errText ? `Error: ${errText.slice(0, 220)} · ` : 'No error detail captured · ') +
+      (sdkErrorText
+        ? `SDK: ${sdkErrorText.slice(0, 200)} · `
+        : errText
+          ? `Error: ${errText.slice(0, 220)} · `
+          : 'No error detail captured · ') +
       `cause: ${classification} · browser: ${onlineTxt}` +
+      (initMs != null ? ` · init ${initMs}ms` : '') +
       (failureCode ? ` · code ${failureCode}` : '');
     const hint = document.createElement('div');
     hint.style.cssText = 'font-size:.78rem;color:#777;margin-bottom:12px;line-height:1.5';
@@ -930,9 +950,12 @@ function initHomepageTest(): void {
     copy.addEventListener('click', () => {
       const text =
         `Test homepage failed to load${failureCode ? ` [${failureCode}]` : ''}\n` +
+        `sdk error: ${sdkErrorText || '(none captured)'}\n` +
         `error: ${errText || '(none captured)'}\n` +
         `classification: ${classification}\n` +
         `browser online: ${onlineTxt}\n` +
+        `init duration: ${initMs != null ? `${initMs}ms` : 'unknown'}\n` +
+        `init fetched:\n${initUrls.length ? initUrls.map(u => `  ${u}`).join('\n') : '  (none captured)'}\n` +
         `mirrors tried: ${mirrorAttempts.length || 1}\n` +
         (mirrorAttempts.length ? `${formatMirrorAttempts(mirrorAttempts)}\n` : '') +
         `script src: ${(() => {
@@ -1077,11 +1100,16 @@ function initHomepageTest(): void {
     // cannot see which host a school filter actually blocked.
     const restoreFetch = captureLuminFetchUrls();
     let settled = false;
+    let initError: unknown = null;
+    let initMs: number | null = null;
+    const initStart = Date.now();
     const finish = (ok: boolean, err?: unknown): boolean => {
       if (settled) return ok;
       settled = true;
       clearTimeout(timer);
       restoreFetch();
+      initMs = Date.now() - initStart;
+      if (!ok) initError = err ?? new Error('Lumin.init() failed');
       if (ok) {
         markLuminInitOk();
         try {
@@ -1127,14 +1155,43 @@ function initHomepageTest(): void {
     }
     setLuminInitPromise(p);
     void p.then(ok => {
-      if (ok) return;
+      if (ok) {
+        // The init resolves as soon as the SDK is connected — the game list
+        // arrives after that. If nothing shows up the library is blocked
+        // even though the init itself worked, so offer the local catalog
+        // instead of leaving an empty black box on screen.
+        setTimeout(() => {
+          try {
+            const shadow = initContainer.shadowRoot;
+            const tiles = shadow ? shadow.querySelectorAll('img').length : 0;
+            if (tiles === 0 && !mount.querySelector('#gg')) {
+              const notice = document.createElement('div');
+              notice.style.cssText =
+                'color:#999;text-align:center;padding:16px;font-size:.8rem;line-height:1.6';
+              notice.textContent =
+                'The game library came back empty (this network blocks it). Showing the built-in catalog below.';
+              mount.appendChild(notice);
+              void renderLocalCatalogFallback(mount);
+            }
+          } catch {
+            /* ignore */
+          }
+        }, 8000);
+        return;
+      }
       // The SDK cannot be re-initialised after a failure, so this is
       // terminal: show the fallback + diagnostics instead of racing mirrors.
+      const initSnapshot = luminInitSnapshot();
       fail(
         new TypeError(
           'Lumin.init() failed — the game library could not be started (the SDK only supports one init per page load)'
         ),
-        mirrorAttempts
+        mirrorAttempts,
+        {
+          error: initError,
+          urls: initSnapshot.fetchUrls,
+          ms: initMs ?? undefined,
+        }
       );
     });
   };

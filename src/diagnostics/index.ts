@@ -22,6 +22,7 @@
 import {
   CDN_TARGETS,
   LUMIN_BACKEND_TARGETS,
+  LUMIN_CACHE_NAME,
   LUMIN_HANDSHAKE_ORIGINS,
   LUMIN_WORKER_FILE_TARGETS,
 } from '../types/index.js';
@@ -325,15 +326,28 @@ export async function probeFetchCors(
       });
       base.ms = Math.round(now() - start);
       base.httpStatus = res.status;
-      // Drain one byte so captive portals that hang the body still resolve.
+      // The SDK has to READ the body, so an unreadable body is a failure
+      // even when the status is 200: a stale content-encoding header or a
+      // filter page that looks like a script breaks Lumin.init ("domain
+      // fetch failed") while a status-only probe stays green.
+      let bodyOk = true;
+      let bodyNote = '';
       try {
-        await res.blob();
-      } catch {
-        /* body unreadable — status is still signal */
+        const blob = await res.blob();
+        bodyOk = blob.size > 0;
+        if (!bodyOk) bodyNote = 'Empty body — the filter answered with a blank page';
+      } catch (err) {
+        bodyOk = false;
+        bodyNote = `Body unreadable: ${describeError(err).slice(0, 120)}`;
       }
-      base.ok = res.ok;
-      base.classification = res.ok ? 'ok' : `http-${res.status}`;
-      if (!res.ok && res.status >= 500) base.note = 'CDN/server error, not a school filter';
+      base.ok = res.ok && bodyOk;
+      base.classification = res.ok ? (bodyOk ? 'ok' : 'body-unreadable') : `http-${res.status}`;
+      if (!bodyOk) {
+        base.note = `${bodyNote}. The SDK has to read this body, so a 200 with an unreadable body still breaks Lumin.init.`;
+      } else if (!res.ok && res.status >= 500) {
+        base.note =
+          'HTTP 5xx — many school filters answer blocked URLs with 503, so treat this as a block unless the same host answers elsewhere.';
+      }
       if (res.status === 403 || res.status === 451)
         base.note = 'Forbidden — typical of a content filter block page';
       return base;
@@ -553,6 +567,58 @@ function probeFrameMessage(url: string, timeout: number): Promise<{ ok: boolean 
   });
 }
 
+/**
+ * What the service worker has cached for the Lumin SDK.
+ *
+ * The SDK script and — more important — its worker file live in a
+ * version-independent Cache Storage bucket. On school WiFi the network copy
+ * is often blocked, so the cached copy is what keeps the homepage alive.
+ * The report has to say whether that copy is there.
+ */
+export async function probeLuminCache(): Promise<ProbeResult> {
+  const start = now();
+  const base: ProbeResult = {
+    name: 'Lumin SW cache',
+    url: LUMIN_CACHE_NAME,
+    method: 'cache-storage',
+    ok: false,
+    httpStatus: null,
+    ms: null,
+    errorName: null,
+    errorMessage: null,
+    classification: null,
+    note: null,
+  };
+  try {
+    if (typeof caches === 'undefined' || typeof caches.open !== 'function') {
+      base.errorName = 'CacheStorageUnavailable';
+      base.errorMessage = 'Cache Storage is not available in this browser';
+      base.classification = 'cache-unavailable';
+      base.note = 'The service worker cannot keep a copy of the Lumin files.';
+      base.ms = Math.round(now() - start);
+      return base;
+    }
+    const cache = await caches.open(LUMIN_CACHE_NAME);
+    const keys = await cache.keys();
+    const urls = keys.map(k => k.url);
+    const hasScript = urls.some(u => u.includes('lumin.min.js'));
+    const hasWorker = urls.some(u => u.includes('lumin.worker'));
+    base.ms = Math.round(now() - start);
+    base.ok = hasScript || hasWorker;
+    base.classification = base.ok ? 'ok' : 'cache-miss';
+    base.note = base.ok
+      ? `Cached Lumin files: ${urls.length} entr${urls.length === 1 ? 'y' : 'ies'} (SDK script: ${hasScript ? 'yes' : 'no'}, worker file: ${hasWorker ? 'yes' : 'no'}).`
+      : `No Lumin files in "${LUMIN_CACHE_NAME}" yet (${urls.length} other entries). The SDK script and its worker file are fetched from the network on a cold cache.`;
+    return base;
+  } catch (err) {
+    base.ms = Math.round(now() - start);
+    base.errorName = err instanceof Error ? err.name : 'Error';
+    base.errorMessage = describeError(err).slice(0, 200);
+    base.classification = 'cache-error';
+    return base;
+  }
+}
+
 /** The default school-WiFi battery: same-origin + CDN + general-internet. */
 export function defaultProbeList(): Array<{ name: string; url: string }> {
   const base = import.meta.env.BASE_URL || './';
@@ -636,6 +702,16 @@ export async function runNetworkProbes(timeout = 8000): Promise<ProbeResult[]> {
   try {
     console.log(
       `[Diag] probe ${handshake.ok ? 'PASS' : 'FAIL'} ${handshake.ms ?? '?'}ms ${handshake.method} ${handshake.name}${handshake.classification ? ` [${handshake.classification}]` : ''}`
+    );
+  } catch {
+    /* ignore */
+  }
+  // What the service worker kept for the SDK (the offline copy).
+  const cacheRow = await probeLuminCache();
+  results.push(cacheRow);
+  try {
+    console.log(
+      `[Diag] probe ${cacheRow.ok ? 'PASS' : 'FAIL'} ${cacheRow.ms ?? '?'}ms ${cacheRow.method} ${cacheRow.name}${cacheRow.classification ? ` [${cacheRow.classification}]` : ''}`
     );
   } catch {
     /* ignore */

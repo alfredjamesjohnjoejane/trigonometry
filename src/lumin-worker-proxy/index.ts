@@ -1,4 +1,5 @@
 import { LUMIN_WORKER_PROXY_URL } from '../types/index.js';
+import { getLuminWorkerFile, saveLuminWorkerFile } from '../lumin-store/index.js';
 
 const INSTALLED_FLAG = '__luminWorkerProxyInstalled';
 const ORIG_WORKER_KEY = '__luminWorkerProxyOrigWorker';
@@ -66,6 +67,46 @@ function extractUrl(input: RequestInfo | URL): string | null {
 }
 
 /**
+ * Keep a copy of the worker file that worked.
+ *
+ * The file changes rarely, so one good copy is enough to boot the SDK when
+ * every Lumin host is filtered (the request that fails with "domain fetch
+ * failed").
+ */
+function rememberWorkerFile(url: string, res: Response): void {
+  try {
+    const clone = res.clone();
+    void clone
+      .text()
+      .then(code => {
+        void saveLuminWorkerFile(url, code).catch(() => {});
+      })
+      .catch(() => {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Serve the last known-good worker file when every host is unreachable. */
+async function offlineWorkerFile(): Promise<Response> {
+  try {
+    const stored = await getLuminWorkerFile();
+    if (!stored || !stored.code) {
+      return new Response('', { status: 504, statusText: 'Gateway Timeout' });
+    }
+    return new Response(stored.code, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/javascript; charset=utf-8',
+        'X-Lumin-Offline-Copy': '1',
+      },
+    });
+  } catch {
+    return new Response('', { status: 504, statusText: 'Gateway Timeout' });
+  }
+}
+
+/**
  * Route the SDK's worker-code fetches through the worker proxy (which rotates
  * upstreams server-side), falling back to the direct URL if the proxy itself
  * is unreachable. Idempotent. Must run before any Lumin.init call, alongside
@@ -96,10 +137,21 @@ export function installLuminWorkerProxy(): boolean {
         // errors: the /lumin/worker edge route only exists after the Cloudflare
         // worker is redeployed, and an old edge serving 404/502 must not mask
         // the SDK's own direct-host rotation.
-        return origFetch(proxyUrl, proxyInit).then(
-          res => (res.ok ? res : origFetch(input, init)),
-          () => origFetch(input, init)
-        );
+        const viaDirect = (): Promise<Response> =>
+          origFetch(input, init).then(
+            direct => {
+              if (direct.ok) rememberWorkerFile(raw, direct);
+              return direct;
+            },
+            () => offlineWorkerFile()
+          );
+        return origFetch(proxyUrl, proxyInit).then(res => {
+          if (res.ok) {
+            rememberWorkerFile(proxyUrl, res);
+            return res;
+          }
+          return viaDirect();
+        }, viaDirect);
       }
       return origFetch(input, init);
     };

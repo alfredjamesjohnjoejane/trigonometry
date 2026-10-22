@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   isLuminBootUrl,
+  isLuminProbeUrl,
   toWorkerBootUrl,
   installLuminBootProxy,
   _uninstallLuminBootProxy,
@@ -31,6 +32,26 @@ describe('isLuminBootUrl', () => {
     );
     expect(isLuminBootUrl('https://example.com/other')).toBe(false);
     expect(isLuminBootUrl('')).toBe(false);
+  });
+
+  it('leaves the handshake documents out of the boot route', () => {
+    // The boot route appends the path to /api/v1/boot and would answer 404,
+    // which kills one of the SDK's two reachability channels.
+    expect(isLuminBootUrl('https://a.luminsdk.com/g/_iframe_probe')).toBe(false);
+    expect(isLuminBootUrl('https://a.luminsdk.com/g/abc/__lumin_canary/?__lp=x')).toBe(false);
+  });
+});
+
+describe('isLuminProbeUrl', () => {
+  it('matches the SDK handshake documents', () => {
+    expect(isLuminProbeUrl('https://a.luminsdk.com/g/_iframe_probe')).toBe(true);
+    expect(isLuminProbeUrl('https://drkesten.com/g/abc/__lumin_canary/?__lp=1')).toBe(true);
+  });
+
+  it('ignores boot URLs and other hosts', () => {
+    expect(isLuminProbeUrl('https://a.luminsdk.com/api/v1/boot?t=1')).toBe(false);
+    expect(isLuminProbeUrl('https://example.com/g/_iframe_probe')).toBe(false);
+    expect(isLuminProbeUrl('')).toBe(false);
   });
 });
 
@@ -98,5 +119,76 @@ describe('installLuminBootProxy', () => {
     installLuminBootProxy();
     await window.fetch('https://example.com/data.json');
     expect(calls).toEqual(['https://example.com/data.json']);
+  });
+
+  it('keeps handshake documents off the boot route', async () => {
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (input: unknown) => {
+      calls.push(String(input));
+      return new Response('ok', { status: 200 });
+    });
+    installLuminBootProxy();
+    await window.fetch('https://a.luminsdk.com/g/_iframe_probe');
+    // Never the boot route: it would answer 404 and kill the channel.
+    expect(calls[0]).toBe('https://a.luminsdk.com/g/_iframe_probe');
+  });
+
+  it('answers the handshake locally when the network fails', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    installLuminBootProxy();
+    const res = await window.fetch('https://a.luminsdk.com/g/_iframe_probe');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('X-Lumin-Handshake')).toBe('local');
+    expect(await res.text()).toContain('lumin-ok-frame');
+  });
+
+  it('echoes the canary nonce in the local answer', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    installLuminBootProxy();
+    const res = await window.fetch('https://a.luminsdk.com/g/abc/__lumin_canary/?__lp=nonce42');
+    const text = await res.text();
+    expect(text).toContain('frame-ok');
+    expect(text).toContain('nonce42');
+  });
+});
+
+describe('installLuminHandshakeShim', () => {
+  it('answers the SDK handshake with the Lumin origin', () => {
+    installLuminBootProxy();
+    const seen: MessageEvent[] = [];
+    const listener = (e: Event): void => {
+      seen.push(e as MessageEvent);
+    };
+    window.addEventListener('message', listener);
+    const frame = document.createElement('iframe');
+    frame.src = 'https://a.luminsdk.com/g/_iframe_probe';
+    document.body.appendChild(frame);
+    const probe = seen.find(m => m.data === 'lumin-ok-frame');
+    expect(probe).toBeTruthy();
+    // The SDK checks the origin: a blob: frame would carry the page origin.
+    expect(probe?.origin).toBe('https://a.luminsdk.com');
+
+    seen.length = 0;
+    const canary = document.createElement('iframe');
+    canary.src = 'https://drkesten.com/g/abc/__lumin_canary/?__lp=nonce42';
+    document.body.appendChild(canary);
+    const canaryMsg = seen.find(
+      m => typeof m.data === 'object' && (m.data as { game?: string })?.game === '__lumin_canary'
+    );
+    expect(canaryMsg).toBeTruthy();
+    expect(canaryMsg?.origin).toBe('https://drkesten.com');
+    expect((canaryMsg?.data as { nonce?: string })?.nonce).toBe('nonce42');
+    window.removeEventListener('message', listener);
+  });
+
+  it('leaves other iframes alone', () => {
+    installLuminBootProxy();
+    const frame = document.createElement('iframe');
+    frame.src = 'https://example.com/embed';
+    expect(frame.src).toBe('https://example.com/embed');
   });
 });
