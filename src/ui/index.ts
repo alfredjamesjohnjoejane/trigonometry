@@ -1281,9 +1281,26 @@ function initHomepageTest(): void {
       /* ignore */
     }
   };
+  // The SDK may only be ON the page once.
+  //
+  // It installs a getter for the `Lumin` global and the boot code assigns the
+  // real SDK to it. A second copy of the script replaces that getter, so the
+  // first copy's assignment no longer reaches its setter: its queued init
+  // call is never flushed, the init promise never settles and the homepage
+  // hangs on "Loading the game library…" forever.
+  //
+  // After the first visit the service worker serves every mirror from its
+  // cache, so all of them arrive within milliseconds — the race has to stop
+  // the moment the first copy is on the page.
+  let raceStopped = false;
+  const stopRace = (winnerTagId: string): void => {
+    if (raceStopped) return;
+    raceStopped = true;
+    cleanupLosers(winnerTagId);
+  };
   const winRace = (tagId: string): void => {
     if (!tracker.win()) return;
-    cleanupLosers(tagId);
+    stopRace(tagId);
   };
   const loseMirror = (): void => {
     tracker.lose();
@@ -1321,6 +1338,8 @@ function initHomepageTest(): void {
       if (tracker.won) return;
       if (hasLumin()) {
         recordAttempt(url, tier, true, ms);
+        // The SDK is on the page — stop the race so no second copy runs.
+        stopRace(tagId);
         // Exactly one mirror initialises the SDK; the rest are ignored.
         startLuminInit(tagId);
       } else {
@@ -1348,13 +1367,35 @@ function initHomepageTest(): void {
     };
     document.body.appendChild(bs);
   };
-  // Tier 0 for the whole race: last-good bytes from IndexedDB (zero network).
+  // Last-good copy from IndexedDB (zero network). It waits for the first
+  // mirror to settle before it executes anything: the SDK may only be on the
+  // page once, and the vendor copy (same origin) is the fastest source
+  // anyway. Running both at the same time put two copies of the SDK on the
+  // page, and the second one stole the global from the first — the init of
+  // the first copy was then never resolved and the homepage hung on
+  // "Loading the game library…".
+  let markVendorSettled: () => void = () => {};
+  const vendorSettledPromise = new Promise<void>(resolve => {
+    markVendorSettled = () => {
+      resolve();
+    };
+  });
   const tryIdbTier = (): void => {
     const f0 = nowMs();
-    void getLuminScript()
+    void Promise.race([
+      vendorSettledPromise,
+      new Promise<void>(resolve => setTimeout(resolve, 15000)),
+    ])
+      .then(() => getLuminScript())
       .then(stored => {
         if (tracker.won || !stored) {
           loseMirror();
+          return;
+        }
+        if (hasLumin()) {
+          // A mirror already put the SDK on the page — a second copy would
+          // break the init.
+          recordAttempt(`${stored.url}#idb`, 'idb', true, Math.round(nowMs() - f0));
           return;
         }
         const ms = Math.round(nowMs() - f0);
@@ -1443,6 +1484,7 @@ function initHomepageTest(): void {
     timer = setTimeout(() => {
       if (settled || tracker.won) return;
       settled = true;
+      if (index === 0) markVendorSettled();
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
         url,
@@ -1462,6 +1504,7 @@ function initHomepageTest(): void {
       if (settled || tracker.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (index === 0) markVendorSettled();
       const ms = Math.round(nowMs() - t0);
       if (hasLumin()) {
         recordAttempt(url, 'tag', true, ms);
@@ -1475,6 +1518,8 @@ function initHomepageTest(): void {
         } catch {
           /* best-effort seeding only */
         }
+        // The SDK is on the page — stop the race so no second copy runs.
+        stopRace(tagId);
         // Exactly one mirror initialises the SDK; the rest are ignored.
         startLuminInit(tagId);
       } else {
@@ -1494,6 +1539,7 @@ function initHomepageTest(): void {
       if (settled || tracker.won) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      if (index === 0) markVendorSettled();
       const ms = Math.round(nowMs() - t0);
       recordAttempt(
         url,
@@ -1506,11 +1552,11 @@ function initHomepageTest(): void {
     };
     document.body.appendChild(s);
   };
-  // Run the mirror race: IDB tier + vendor fire immediately, worker proxy
-  // ~1.2s, POPs after. The first mirror that loads the SDK wins the race and
-  // is the one that initialises it — later mirrors only re-load the same
-  // script and are ignored (a second Lumin.init would tear the rendered grid
-  // down again).
+  // Run the mirror race: the vendor copy fires immediately, the worker proxy
+  // ~1.2s, the POPs after. The first mirror that loads the SDK wins the race
+  // and is the one that initialises it — the others are stopped right away,
+  // because the SDK may only be on the page once (a second copy steals the
+  // `Lumin` global from the first and its init is never resolved).
   const runMirrorRace = (): void => {
     tryIdbTier();
     mirrorUrls.forEach((_u, i) => {
