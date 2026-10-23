@@ -147,11 +147,11 @@ const LUMIN_WORKER_UPSTREAMS = [
   'https://instructure-ramen.hpsschools.org/v1/lumin.worker.js',
 ];
 const LUMIN_BOOT_UPSTREAMS = [
-  'https://a.luminsdk.com/api/v1/boot',
-  'https://drkesten.com/api/v1/boot',
-  'https://milpagan.org/api/v1/boot',
-  'https://catholicrebuttals.com/api/v1/boot',
-  'https://instructure-ramen.hpsschools.org/api/v1/boot',
+  'https://a.luminsdk.com',
+  'https://drkesten.com',
+  'https://milpagan.org',
+  'https://catholicrebuttals.com',
+  'https://instructure-ramen.hpsschools.org',
 ];
 // Origins the Lumin game player loads resources from (game player pages,
 // their assets, and third-party assets such as the Ruffle Flash emulator).
