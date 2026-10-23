@@ -318,7 +318,38 @@ export function installLuminUrlRewrite(): boolean {
               return;
             }
             const rewritten = toProxyUrl(value);
-            descSet.call(this, rewritten != null ? rewritten : value);
+            if (rewritten) {
+              // Fetch through proxy and use srcdoc so the proxied HTML can be
+              // embedded in an iframe on this origin. Directly setting src to
+              // the proxy URL would fail because the proxied page carries
+              // X-Frame-Options: SAMEORIGIN, which the browser enforces
+              // regardless of the proxy stripping it (Cloudflare re-adds it
+              // after the worker returns). srcdoc bypasses this entirely
+              // because the iframe loads inline content with the page's origin.
+              originalSrc.set(this, String(value));
+              const iframe = this;
+              fetch(rewritten)
+                .then(async (res) => {
+                  if (!res.ok) return;
+                  let html = await res.text();
+                  // Add a <base> tag so relative URLs resolve against the
+                  // proxy URL rather than this page's origin.
+                  const baseTag = `<base href="${rewritten}">`;
+                  if (html.includes('<head>')) {
+                    html = html.replace(/<head>/i, '<head>' + baseTag);
+                  } else if (html.includes('<body>')) {
+                    html = '<head>' + baseTag + '</head>' + html;
+                  } else {
+                    html = '<head>' + baseTag + '</head>' + html;
+                  }
+                  iframe.srcdoc = html;
+                })
+                .catch(() => {
+                  // Silently fail - iframe stays blank until next navigation.
+                });
+              return;
+            }
+            descSet.call(this, value);
           },
         });
       }
@@ -334,7 +365,23 @@ export function installLuminUrlRewrite(): boolean {
           }
           const rewritten = toProxyUrl(String(value));
           if (rewritten) {
-            origSetAttribute.call(this, 'src', rewritten);
+            originalSrc.set(this, String(value));
+            const iframe = this;
+            fetch(rewritten)
+              .then(async (res) => {
+                if (!res.ok) return;
+                let html = await res.text();
+                const baseTag = `<base href="${rewritten}">`;
+                if (html.includes('<head>')) {
+                  html = html.replace(/<head>/i, '<head>' + baseTag);
+                } else {
+                  html = '<head>' + baseTag + '</head>' + html;
+                }
+                iframe.srcdoc = html;
+              })
+              .catch(() => {
+                // Silently fail.
+              });
             return;
           }
         }

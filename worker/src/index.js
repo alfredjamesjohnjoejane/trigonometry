@@ -1063,6 +1063,10 @@ async function proxyLuminGeneric(request, url) {
     const outHeaders = new Headers(res.headers);
     outHeaders.set('X-Lumin-Upstream', origin);
     outHeaders.set('Cache-Control', 'no-store');
+    // Strip X-Frame-Options so the proxied game page can be embedded in an
+    // iframe on a different origin (the hub page). Without this, the browser
+    // blocks the iframe due to SAMEORIGIN and the game never appears.
+    outHeaders.delete('x-frame-options');
     const cors = luminCorsHeaders();
     for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
     let body = res.body;
