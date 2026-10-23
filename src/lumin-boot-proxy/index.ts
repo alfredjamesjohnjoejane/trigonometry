@@ -279,6 +279,74 @@ function toProxyUrl(raw: string): string | null {
   }
 }
 
+/** The Lumin origin each proxied iframe was really loaded from. */
+const proxiedFrameOrigins = new WeakMap<HTMLIFrameElement, string>();
+/** Fast path: the WindowProxy a message came from -> its real origin. */
+const reoriginatedSources = new WeakMap<object, string>();
+let messageReoriginInstalled = false;
+
+function rememberProxiedOrigin(iframe: HTMLIFrameElement, rawUrl: string): void {
+  try {
+    proxiedFrameOrigins.set(iframe, new URL(rawUrl).origin);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Re-stamp messages from proxied game frames with their original Lumin origin.
+ *
+ * The SDK creates the game as `<domain>/g/...` and only accepts the
+ * `{__lumin:"frame-ok", ...}` readiness handshake when the message comes from
+ * that domain. Because the frame is loaded through the worker proxy, its
+ * messages carry the worker's origin instead: the SDK rejects every candidate
+ * domain, deletes the hidden probe and retries the next host forever — the
+ * game never becomes visible. The page can restore the expected origin because
+ * it knows which origin each rewritten frame stands for (the proxy URL encodes
+ * it). The original message is stopped and re-dispatched with the Lumin origin,
+ * the same trick the /g/_iframe_probe answer uses.
+ */
+function installMessageReorigin(): void {
+  if (messageReoriginInstalled) return;
+  messageReoriginInstalled = true;
+  window.addEventListener(
+    'message',
+    (event: MessageEvent) => {
+      try {
+        if (event.origin !== LUMIN_WORKER_ORIGIN) return;
+        const source = event.source as unknown as object | null;
+        if (!source) return;
+        let origin = reoriginatedSources.get(source);
+        if (!origin) {
+          for (const frame of Array.from(document.querySelectorAll('iframe'))) {
+            if (frame.contentWindow !== event.source) continue;
+            const real = proxiedFrameOrigins.get(frame);
+            if (real) {
+              origin = real;
+              reoriginatedSources.set(source, real);
+            }
+            break;
+          }
+        }
+        if (!origin) return;
+        event.stopImmediatePropagation();
+        window.dispatchEvent(
+          new MessageEvent('message', {
+            data: event.data,
+            origin,
+            source: event.source,
+            bubbles: false,
+            cancelable: false,
+          })
+        );
+      } catch {
+        /* message plumbing must never break the page */
+      }
+    },
+    true
+  );
+}
+
 /**
  * Rewrite Lumin game URLs to the worker proxy so every resource the game
  * player loads stays on the single origin the school allows.
@@ -319,34 +387,15 @@ export function installLuminUrlRewrite(): boolean {
             }
             const rewritten = toProxyUrl(value);
             if (rewritten) {
-              // Fetch through proxy and use srcdoc so the proxied HTML can be
-              // embedded in an iframe on this origin. Directly setting src to
-              // the proxy URL would fail because the proxied page carries
-              // X-Frame-Options: SAMEORIGIN, which the browser enforces
-              // regardless of the proxy stripping it (Cloudflare re-adds it
-              // after the worker returns). srcdoc bypasses this entirely
-              // because the iframe loads inline content with the page's origin.
-              originalSrc.set(this, String(value));
-              const iframe = this;
-              fetch(rewritten)
-                .then(async (res) => {
-                  if (!res.ok) return;
-                  let html = await res.text();
-                  // Add a <base> tag so relative URLs resolve against the
-                  // proxy URL rather than this page's origin.
-                  const baseTag = `<base href="${rewritten}">`;
-                  if (html.includes('<head>')) {
-                    html = html.replace(/<head>/i, '<head>' + baseTag);
-                  } else if (html.includes('<body>')) {
-                    html = '<head>' + baseTag + '</head>' + html;
-                  } else {
-                    html = '<head>' + baseTag + '</head>' + html;
-                  }
-                  iframe.srcdoc = html;
-                })
-                .catch(() => {
-                  // Silently fail - iframe stays blank until next navigation.
-                });
+              // Load the proxied game document directly. The worker strips
+              // upstream frame restrictions (no X-Frame-Options on the proxied
+              // HTML), so the frame can embed it. Keeping it a real document is
+              // essential: srcdoc copies have about:srcdoc as their URL and the
+              // browser refuses a cross-origin <base>, so every relative game
+              // asset resolved against the hub origin and 404'd — the game
+              // never rendered.
+              rememberProxiedOrigin(this, value);
+              descSet.call(this, rewritten);
               return;
             }
             descSet.call(this, value);
@@ -365,23 +414,11 @@ export function installLuminUrlRewrite(): boolean {
           }
           const rewritten = toProxyUrl(String(value));
           if (rewritten) {
-            originalSrc.set(this, String(value));
-            const iframe = this;
-            fetch(rewritten)
-              .then(async (res) => {
-                if (!res.ok) return;
-                let html = await res.text();
-                const baseTag = `<base href="${rewritten}">`;
-                if (html.includes('<head>')) {
-                  html = html.replace(/<head>/i, '<head>' + baseTag);
-                } else {
-                  html = '<head>' + baseTag + '</head>' + html;
-                }
-                iframe.srcdoc = html;
-              })
-              .catch(() => {
-                // Silently fail.
-              });
+            // Load the proxied document directly (see the src setter above):
+            // the proxy strips X-Frame-Options, and a real document keeps the
+            // proxied URL as its base URI so relative assets resolve correctly.
+            rememberProxiedOrigin(this, String(value));
+            origSetAttribute.call(this, 'src', rewritten);
             return;
           }
         }
@@ -422,6 +459,10 @@ export function installLuminUrlRewrite(): boolean {
         return origOpen.call(w, rewritten != null ? rewritten : url, target, features);
       };
     }
+
+    // Game frames are proxied, so their readiness messages arrive with the
+    // worker origin; restore the Lumin origin the SDK validates against.
+    installMessageReorigin();
 
     w[URL_REWRITE_FLAG] = true;
     return true;

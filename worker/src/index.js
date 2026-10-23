@@ -1067,13 +1067,34 @@ async function proxyLuminGeneric(request, url) {
     // iframe on a different origin (the hub page). Without this, the browser
     // blocks the iframe due to SAMEORIGIN and the game never appears.
     outHeaders.delete('x-frame-options');
+    // Follow redirects through the proxy: upstream CDNs (unpkg, Lumin game
+    // hosts) answer with 302s to another path/host. Passing that Location
+    // through would send the browser direct to a host the school may filter.
+    if (res.status >= 300 && res.status < 400) {
+      const location = outHeaders.get('location');
+      if (location) {
+        outHeaders.set('location', rewriteProxyLocation(location, origin));
+      }
+    }
+    // The proxy rewrites and augments documents, so honouring the upstream CSP
+    // would block the injected shim and the proxied subresources. The proxy is
+    // the trust boundary here; the upstream policy refers to the upstream
+    // origin and cannot be enforced on the worker origin anyway.
+    outHeaders.delete('content-security-policy');
+    outHeaders.delete('content-security-policy-report-only');
     const cors = luminCorsHeaders();
     for (const [k, v] of Object.entries(cors)) outHeaders.set(k, v);
     let body = res.body;
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
       const text = await res.text();
-      const rewritten = rewriteProxyHtml(text);
+      const rewritten = rewriteProxyHtml(text, origin);
+      outHeaders.set('content-length', String(new TextEncoder().encode(rewritten).length));
+      outHeaders.delete('content-encoding');
+      body = rewritten;
+    } else if (contentType.includes('text/css')) {
+      const text = await res.text();
+      const rewritten = rewriteProxyCss(text, origin);
       outHeaders.set('content-length', String(new TextEncoder().encode(rewritten).length));
       outHeaders.delete('content-encoding');
       body = rewritten;
@@ -1084,18 +1105,148 @@ async function proxyLuminGeneric(request, url) {
   }
 }
 
-// Rewrite absolute URLs in proxied HTML so the whole page stays on the proxy.
-// https://<origin>/... -> /lumin/x/<origin>/... (and the same for
-// protocol-relative //<origin>/...), so game assets and third-party assets the
-// game page loads are fetched through the proxy instead of direct to hosts the
-// school may filter.
-function rewriteProxyHtml(html) {
-  let out = html;
-  for (const origin of LUMIN_PROXY_ORIGINS) {
-    const re = new RegExp('https?:\\/\\/' + escapeRegExp(origin) + '/', 'g');
-    out = out.replace(re, `/lumin/x/${origin}/`);
+// Rewrite URLs in proxied HTML so the whole page stays on the proxy.
+//
+// Two cases matter:
+//  1. Absolute URLs on a proxied origin (https://<origin>/... or
+//     //<origin>/...) become /lumin/x/<origin>/...
+//  2. Root-relative URLs (/js/all.min.js, /assets/x.png, CSS url(/...)) must
+//     be scoped to the upstream origin as well. Left alone they resolve
+//     against the *worker* origin (/js/all.min.js on
+//     url-marketplace...workers.dev), which has no such route and the game
+//     never renders. Relative URLs (assets/x.png) already work because the
+//     document URL is /lumin/x/<origin>/<path>.
+//
+// A tiny in-page shim handles root-relative URLs built at runtime (fetch,
+// XHR, element src/href, location changes) that cannot be rewritten here.
+function rewriteProxyHtml(html, origin) {
+  let out = html.replace(
+    /<meta[^>]+http-equiv\s*=\s*["']?content-security-policy["']?[^>]*>/gi,
+    ''
+  );
+  for (const o of LUMIN_PROXY_ORIGINS) {
+    const escaped = escapeRegExp(o);
+    out = out.replace(new RegExp('https?:\\/\\/' + escaped + '/', 'g'), `/lumin/x/${o}/`);
+    out = out.replace(
+      new RegExp('(^|[\\s"\'=(])//' + escaped + '/', 'g'),
+      `$1/lumin/x/${o}/`
+    );
+  }
+  // Root-relative URL attributes: src="/x" -> src="/lumin/x/<origin>/x".
+  out = out.replace(
+    /(\b(?:src|href|action|poster|data-src|data-href)\s*=\s*)(["'])\/(?!\/|lumin\/)/gi,
+    (_m, pre, quote) => `${pre}${quote}/lumin/x/${origin}/`
+  );
+  // srcset holds a comma-separated list of URLs, each optionally followed by
+  // a density/size descriptor.
+  out = out.replace(/(\bsrcset\s*=\s*)(["'])([^"']*)\2/gi, (_m, pre, quote, value) => {
+    const rewritten = value
+      .split(',')
+      .map((part) => {
+        const match = part.trim().match(/^(\S+)([\s\S]*)$/);
+        if (!match) return part;
+        const [url, rest] = [match[1], match[2] || ''];
+        if (!url.startsWith('/') || url.startsWith('//') || url.startsWith('/lumin/')) {
+          return part;
+        }
+        return `/lumin/x/${origin}${url}${rest}`;
+      })
+      .join(', ');
+    return `${pre}${quote}${rewritten}${quote}`;
+  });
+  // Inline styles and <style> blocks frequently point at root-relative
+  // images/fonts.
+  out = rewriteCssUrls(out, origin);
+
+  const shim = proxyUrlShim(origin);
+  if (/<head(\s[^>]*)?>/i.test(out)) {
+    out = out.replace(/<head(\s[^>]*)?>/i, (match) => match + shim);
+  } else {
+    out = shim + out;
   }
   return out;
+}
+
+// Rewrite URLs inside a CSS stylesheet (or an HTML fragment with inline CSS).
+function rewriteProxyCss(css, origin) {
+  let out = css;
+  for (const o of LUMIN_PROXY_ORIGINS) {
+    const escaped = escapeRegExp(o);
+    out = out.replace(new RegExp('https?:\\/\\/' + escaped + '/', 'g'), `/lumin/x/${o}/`);
+    out = out.replace(
+      new RegExp('(^|[\\s"\'=(])//' + escaped + '/', 'g'),
+      `$1/lumin/x/${o}/`
+    );
+  }
+  return rewriteCssUrls(out, origin);
+}
+
+function rewriteProxyLocation(location, origin) {
+  try {
+    const target = new URL(location, `https://${origin}/`);
+    const host = target.hostname.toLowerCase();
+    if (!LUMIN_PROXY_ORIGINS.includes(host)) return location;
+    return `/lumin/x/${host}${target.pathname}${target.search || ''}${target.hash || ''}`;
+  } catch {
+    return location;
+  }
+}
+
+function rewriteCssUrls(css, origin) {
+  return css
+    .replace(
+      /url\(\s*(['"]?)\/(?!\/|lumin\/)([^)'"]*)\1\s*\)/gi,
+      (_m, quote, path) => `url(${quote}/lumin/x/${origin}/${path}${quote})`
+    )
+    .replace(
+      /@import\s+(['"])\/(?!\/|lumin\/)([^'"]*)\1/gi,
+      (_m, quote, path) => `@import ${quote}/lumin/x/${origin}/${path}${quote}`
+    );
+}
+
+// Inline script injected into proxied documents. It scopes root-relative URLs
+// to the upstream origin at runtime, so games that build paths dynamically
+// (fetch('/api/...'), img.src = '/assets/...') keep working.
+function proxyUrlShim(origin) {
+  return (
+    '<script>(function(){var P=' +
+    JSON.stringify(`/lumin/x/${origin}`) +
+    ',H=' +
+    JSON.stringify(LUMIN_PROXY_ORIGINS) +
+    ';function f(u){try{' +
+    'if(typeof u!=="string")return u;' +
+    'var a=u.match(/^https?:\\/\\/([^/]+)(\\/[\\s\\S]*)?$/);' +
+    'if(a){var h=a[1].toLowerCase();' +
+    'return H.indexOf(h)===-1?u:"/lumin/x/"+h+(a[2]||"/");}' +
+    'if(u.charCodeAt(0)!==47||u.charAt(1)==="/")return u;' +
+    'if(u===P||u.slice(0,P.length+1)===P+"/")return u;' +
+    'return P+u;}catch(e){return u;}}' +
+    'try{var of=window.fetch;if(of){window.fetch=function(i,o){try{' +
+    'if(typeof i==="string")i=f(i);' +
+    'else if(i&&typeof i.url==="string")i=new Request(f(i.url),i);' +
+    '}catch(e){}return of.call(this,i,o);};}}catch(e){}' +
+    'try{var xo=XMLHttpRequest.prototype.open;' +
+    'XMLHttpRequest.prototype.open=function(m,u){var a=[].slice.call(arguments);' +
+    'a[1]=f(u);return xo.apply(this,a);};}catch(e){}' +
+    'try{var so=Element.prototype.setAttribute;' +
+    'Element.prototype.setAttribute=function(n,v){var k=String(n).toLowerCase();' +
+    'if(k==="src"||k==="href"||k==="poster"||k==="data-src")v=f(v);' +
+    'return so.call(this,n,v);};}catch(e){}' +
+    'try{["HTMLImageElement","HTMLScriptElement","HTMLMediaElement",' +
+    '"HTMLSourceElement","HTMLTrackElement","HTMLIFrameElement"].forEach(function(n){' +
+    'var C=window[n];if(!C)return;var d=Object.getOwnPropertyDescriptor(C.prototype,"src");' +
+    'if(d&&d.get&&d.set){Object.defineProperty(C.prototype,"src",{configurable:true,' +
+    'enumerable:d.enumerable,get:d.get,set:function(v){return d.set.call(this,f(v));}});}' +
+    '});}catch(e){}' +
+    'try{var l=window.HTMLLinkElement;var d=l&&Object.getOwnPropertyDescriptor(l.prototype,"href");' +
+    'if(d&&d.get&&d.set){Object.defineProperty(l.prototype,"href",{configurable:true,' +
+    'enumerable:d.enumerable,get:d.get,set:function(v){return d.set.call(this,f(v));}});}}catch(e){}' +
+    'try{var oa=Location.prototype.assign;' +
+    'if(oa)Location.prototype.assign=function(u){return oa.call(this,f(u));};' +
+    'var orp=Location.prototype.replace;' +
+    'if(orp)Location.prototype.replace=function(u){return orp.call(this,f(u));};}catch(e){}' +
+    '})();<\/script>'
+  );
 }
 
 function escapeRegExp(s) {

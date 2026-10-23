@@ -192,3 +192,61 @@ describe('installLuminHandshakeShim', () => {
     expect(frame.src).toBe('https://example.com/embed');
   });
 });
+
+describe('installLuminUrlRewrite', () => {
+  it('loads Lumin game frames through the proxy', () => {
+    installLuminBootProxy();
+    const frame = document.createElement('iframe');
+    frame.src = 'https://a.luminsdk.com/g/abc/selenite/game/?__lp=n1';
+    document.body.appendChild(frame);
+    expect(frame.src).toBe(
+      'https://url-marketplace.jesherhaed.workers.dev/lumin/x/a.luminsdk.com/g/abc/selenite/game/?__lp=n1'
+    );
+  });
+
+  it('re-stamps messages from a proxied frame with the Lumin origin', () => {
+    installLuminBootProxy();
+    const frame = document.createElement('iframe');
+    frame.src = 'https://a.luminsdk.com/g/abc/selenite/game/?__lp=n2';
+    document.body.appendChild(frame);
+    const seen: MessageEvent[] = [];
+    const listener = (e: Event): void => {
+      seen.push(e as MessageEvent);
+    };
+    window.addEventListener('message', listener);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { __lumin: 'frame-ok', game: 'selenite/game', nonce: 'n2' },
+        origin: 'https://url-marketplace.jesherhaed.workers.dev',
+        source: frame.contentWindow,
+      })
+    );
+    window.removeEventListener('message', listener);
+    // Exactly one delivery, with the origin the SDK validates against.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.origin).toBe('https://a.luminsdk.com');
+    expect((seen[0]?.data as { game?: string }).game).toBe('selenite/game');
+  });
+
+  it('leaves messages from other origins untouched', () => {
+    installLuminBootProxy();
+    const frame = document.createElement('iframe');
+    frame.src = 'https://a.luminsdk.com/g/abc/selenite/game/';
+    document.body.appendChild(frame);
+    const seen: MessageEvent[] = [];
+    const listener = (e: Event): void => {
+      seen.push(e as MessageEvent);
+    };
+    window.addEventListener('message', listener);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: 'hello',
+        origin: 'https://example.com',
+        source: frame.contentWindow,
+      })
+    );
+    window.removeEventListener('message', listener);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.origin).toBe('https://example.com');
+  });
+});
