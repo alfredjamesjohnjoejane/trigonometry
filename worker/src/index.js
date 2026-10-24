@@ -1018,6 +1018,28 @@ async function proxyLuminBoot(request, url) {
   );
 }
 
+// Root-relative request from inside a proxied game page. The Referer is the
+// game document URL (/lumin/x/<origin>/...), so resolve the missing path
+// against that same upstream origin. Requests without a proxied referer (or
+// for non-allowlisted origins) are left alone, so this is not an open proxy.
+function inferProxiedRequest(request, url) {
+  const referer = request.headers.get('referer');
+  if (!referer) return null;
+  try {
+    const ref = new URL(referer);
+    if (ref.origin !== url.origin) return null;
+    const match = ref.pathname.match(/^\/lumin\/x\/([^/]+)\//);
+    if (!match) return null;
+    const origin = match[1].toLowerCase();
+    if (!LUMIN_PROXY_ORIGINS.includes(origin)) return null;
+    return new URL(
+      `${url.origin}/lumin/x/${origin}${url.pathname}${url.search || ''}`
+    );
+  } catch {
+    return null;
+  }
+}
+
 // GET/POST /lumin/x/<origin>/<path...> — generic reverse proxy for any origin.
 // Keeps Lumin SDK game resources (game player pages and their assets, plus
 // third-party assets the game page loads) on the worker origin, which the
@@ -1245,6 +1267,8 @@ function proxyUrlShim(origin) {
     'if(oa)Location.prototype.assign=function(u){return oa.call(this,f(u));};' +
     'var orp=Location.prototype.replace;' +
     'if(orp)Location.prototype.replace=function(u){return orp.call(this,f(u));};}catch(e){}' +
+    'try{var W=window.Worker;if(W){var wf=function(u,o){return new W(f(u),o);};' +
+    'wf.prototype=W.prototype;window.Worker=wf;}}catch(e){}' +
     '})();<\/script>'
   );
 }
@@ -1299,6 +1323,12 @@ export default {
     if (url.pathname === '/lumin/x' || url.pathname.startsWith('/lumin/x/')) {
       return proxyLuminGeneric(request, url);
     }
+    // Root-relative resources requested by a proxied game page (scripts,
+    // images, workers, dynamic imports the HTML/CSS rewrite could not see).
+    // The browser sends the game document as the Referer, which encodes the
+    // upstream origin, so serve those paths from that same origin.
+    const inferred = inferProxiedRequest(request, url);
+    if (inferred) return proxyLuminGeneric(request, inferred);
 
     const token = env.GITHUB_TOKEN;
     if (!token) return json({ error: 'Server misconfigured: GITHUB_TOKEN missing.' }, 500);
