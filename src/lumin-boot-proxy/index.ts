@@ -279,6 +279,64 @@ function toProxyUrl(raw: string): string | null {
   }
 }
 
+/** Hosts that serve Lumin game documents (the boot hosts, minus the proxy). */
+function documentOrigins(): Set<string> {
+  const worker = workerHostname();
+  const hosts = new Set<string>();
+  for (const t of LUMIN_BACKEND_TARGETS) {
+    try {
+      const host = new URL(t.url).hostname.toLowerCase();
+      if (host === worker) continue;
+      hosts.add(host);
+    } catch {
+      /* ignore */
+    }
+  }
+  return hosts;
+}
+
+function isGameDocumentUrl(u: URL): boolean {
+  if (!documentOrigins().has(u.hostname.toLowerCase())) return false;
+  // The SDK's player pages live under /g/. Also accept a bare directory or
+  // .html document so a future path shape keeps working.
+  return u.pathname.startsWith('/g/') || u.pathname.endsWith('/') || /\.html?$/i.test(u.pathname);
+}
+
+function hexEncode(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let out = '';
+  for (const byte of bytes) out += byte.toString(16).padStart(2, '0');
+  return out;
+}
+
+/**
+ * Rewrite a Lumin game document URL to the hub's own static shell.
+ *
+ * School extensions block `*.workers.dev` sub-frames outright, so the game
+ * document cannot be loaded from the worker directly. The shell
+ * (`p.html?u=<hex>`) is a same-origin document that fetches the worker
+ * server-side-equivalent from the page and writes the result into itself.
+ * The token is hex, not base64: hex can never contain "game"/"proxy"/
+ * "unblock", which are the words the extension's github.io iframe rule
+ * matches on.
+ */
+export function toLuminDocumentUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (!isGameDocumentUrl(u)) return null;
+    const base = new URL('p.html', document.baseURI).href;
+    const token = hexEncode(`${u.hostname.toLowerCase()}\n${u.pathname}${u.search || ''}`);
+    // The Lumin player reads its handshake nonce from `location.search` and
+    // echoes it in the `frame-ok` message. The shell's own query string is
+    // what the player sees, so carry the nonce over explicitly. (Without it
+    // the SDK rejects every candidate domain and keeps retrying forever.)
+    const nonce = u.searchParams.get('__lp');
+    return `${base}?u=${token}${nonce ? `&__lp=${encodeURIComponent(nonce)}` : ''}`;
+  } catch {
+    return null;
+  }
+}
+
 /** The Lumin origin each proxied iframe was really loaded from. */
 const proxiedFrameOrigins = new WeakMap<HTMLIFrameElement, string>();
 /** Fast path: the WindowProxy a message came from -> its real origin. */
@@ -313,7 +371,9 @@ function installMessageReorigin(): void {
     'message',
     (event: MessageEvent) => {
       try {
-        if (event.origin !== LUMIN_WORKER_ORIGIN) return;
+        // Worker-proxied frames keep the worker origin; same-origin shell
+        // frames report the hub origin. Both stand in for a Lumin origin.
+        if (event.origin !== LUMIN_WORKER_ORIGIN && event.origin !== location.origin) return;
         const source = event.source as unknown as object | null;
         if (!source) return;
         let origin = reoriginatedSources.get(source);
@@ -385,17 +445,14 @@ export function installLuminUrlRewrite(): boolean {
               deliverHandshakeMessage(u, this);
               return;
             }
-            const rewritten = toProxyUrl(value);
-            if (rewritten) {
-              // Load the proxied game document directly. The worker strips
-              // upstream frame restrictions (no X-Frame-Options on the proxied
-              // HTML), so the frame can embed it. Keeping it a real document is
-              // essential: srcdoc copies have about:srcdoc as their URL and the
-              // browser refuses a cross-origin <base>, so every relative game
-              // asset resolved against the hub origin and 404'd — the game
-              // never rendered.
+            const documentUrl = toLuminDocumentUrl(value);
+            if (documentUrl) {
+              // Load the game through the hub's own static shell. A real
+              // workers.dev sub-frame is blocked by school extensions (and the
+              // shell keeps the game document same-origin, so relative assets
+              // resolve correctly — unlike the old srcdoc approach).
               rememberProxiedOrigin(this, value);
-              descSet.call(this, rewritten);
+              descSet.call(this, documentUrl);
               return;
             }
             descSet.call(this, value);
@@ -412,13 +469,13 @@ export function installLuminUrlRewrite(): boolean {
             deliverHandshakeMessage(u, this);
             return;
           }
-          const rewritten = toProxyUrl(String(value));
-          if (rewritten) {
-            // Load the proxied document directly (see the src setter above):
-            // the proxy strips X-Frame-Options, and a real document keeps the
-            // proxied URL as its base URI so relative assets resolve correctly.
+          const documentUrl = toLuminDocumentUrl(String(value));
+          if (documentUrl) {
+            // Load the game through the same-origin shell (see the src setter
+            // above): no workers.dev sub-frame, and a real document keeps
+            // relative game assets resolving against the proxied upstream.
             rememberProxiedOrigin(this, String(value));
-            origSetAttribute.call(this, 'src', rewritten);
+            origSetAttribute.call(this, 'src', documentUrl);
             return;
           }
         }
@@ -457,19 +514,19 @@ export function installLuminUrlRewrite(): boolean {
         enumerable: hrefDesc.enumerable,
         get: hrefDesc.get,
         set(this: Location, v: string) {
-          const rewritten = toProxyUrl(v);
+          const rewritten = toLuminDocumentUrl(v) ?? toProxyUrl(v);
           hrefDesc.set!.call(this, rewritten != null ? rewritten : v);
         },
       });
     }
     const locAssign = Location.prototype.assign;
     Location.prototype.assign = function (this: Location, v: string) {
-      const rewritten = toProxyUrl(v);
+      const rewritten = toLuminDocumentUrl(v) ?? toProxyUrl(v);
       locAssign.call(this, rewritten != null ? rewritten : v);
     };
     const locReplace = Location.prototype.replace;
     Location.prototype.replace = function (this: Location, v: string) {
-      const rewritten = toProxyUrl(v);
+      const rewritten = toLuminDocumentUrl(v) ?? toProxyUrl(v);
       locReplace.call(this, rewritten != null ? rewritten : v);
     };
 
@@ -477,7 +534,7 @@ export function installLuminUrlRewrite(): boolean {
     const origOpen = w.open;
     if (typeof origOpen === 'function') {
       w.open = function (this: Window, url?: string, target?: string, features?: string) {
-        const rewritten = toProxyUrl(url ?? '');
+        const rewritten = toLuminDocumentUrl(url ?? '') ?? toProxyUrl(url ?? '');
         return origOpen.call(w, rewritten != null ? rewritten : url, target, features);
       };
     }

@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
+    <title>Loading…</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #111;
+        color: #ddd;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        overflow: hidden;
+      }
+      #s {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+        padding: 24px;
+        box-sizing: border-box;
+        text-align: center;
+        font-size: 0.95rem;
+        line-height: 1.6;
+        color: #999;
+      }
+      #s button {
+        margin-top: 16px;
+        padding: 10px 22px;
+        border: 0;
+        border-radius: 999px;
+        background: #2c2c2c;
+        color: #eee;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      #s button:hover {
+        background: #3a3a3a;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="s">Loading…</div>
+    <script>
+      (function () {
+        'use strict';
+
+        // Cloudflare Worker that fetches Lumin game documents and their assets
+        // server-side. Keep this in sync with LUMIN_WORKER_ORIGIN in
+        // src/types/index.ts.
+        var WORKER = 'https://url-marketplace.jesherhaed.workers.dev';
+
+        var statusEl = document.getElementById('s');
+
+        function fail(message) {
+          try {
+            statusEl.textContent = '';
+            var text = document.createElement('div');
+            text.textContent = message;
+            var retry = document.createElement('button');
+            retry.type = 'button';
+            retry.textContent = 'Try again';
+            retry.addEventListener('click', function () {
+              window.location.reload();
+            });
+            statusEl.appendChild(text);
+            statusEl.appendChild(retry);
+          } catch (err) {
+            /* ignore */
+          }
+        }
+
+        function hexToText(hex) {
+          var out = '';
+          for (var i = 0; i < hex.length; i += 2) {
+            out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+          }
+          // The token is UTF-8 bytes; decode them so non-ASCII paths survive.
+          try {
+            var bytes = new Uint8Array(out.length);
+            for (var j = 0; j < out.length; j++) bytes[j] = out.charCodeAt(j);
+            return new TextDecoder('utf-8').decode(bytes);
+          } catch (err) {
+            return out;
+          }
+        }
+
+        // The token is hex(origin + "\n" + path + search). Hex can never
+        // contain words like "game", "proxy" or "unblock", which is the whole
+        // point: school extensions block iframe URLs that carry those words.
+        var token = '';
+        try {
+          token = new URL(location.href).searchParams.get('u') || '';
+        } catch (err) {
+          token = '';
+        }
+        if (!token || token.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(token)) {
+          fail('This game link is incomplete. Go back and pick the game again.');
+          return;
+        }
+
+        var decoded = hexToText(token);
+        var split = decoded.indexOf('\n');
+        if (split < 1) {
+          fail('This game link is incomplete. Go back and pick the game again.');
+          return;
+        }
+        var origin = decoded.slice(0, split).toLowerCase();
+        var path = decoded.slice(split + 1);
+        if (!/^[a-z0-9.-]+$/.test(origin) || path.charAt(0) !== '/') {
+          fail('This game link is invalid. Go back and pick the game again.');
+          return;
+        }
+
+        var target = WORKER + '/lumin/x/' + origin + path;
+
+        // Keep this list in sync with LUMIN_PROXY_ORIGINS in
+        // src/types/index.ts.
+        var PROXIED = [
+          'a.luminsdk.com',
+          'drkesten.com',
+          'milpagan.org',
+          'catholicrebuttals.com',
+          'instructure-ramen.hpsschools.org',
+          'unpkg.com',
+          'cdn.r9x.in',
+          'www.googletagmanager.com',
+          'code.jquery.com',
+        ];
+        var WORKER_HOST = 'url-marketplace.jesherhaed.workers.dev';
+        var SHELL_BASE = location.origin + location.pathname;
+
+        function hexOf(text) {
+          var bytes = new TextEncoder().encode(text);
+          var out = '';
+          for (var i = 0; i < bytes.length; i++) out += bytes[i].toString(16).padStart(2, '0');
+          return out;
+        }
+
+        // Games sometimes create their own iframes. Those must go back
+        // through this same-origin shell too: a nested workers.dev iframe is
+        // blocked by the same school rule that blocked the top game frame.
+        // The worker injects its own URL shim, which wraps the iframe setters;
+        // this hook runs first and converts whatever it hands over.
+        function installFrameHook(gameOrigin, gamePath) {
+          function toShell(u) {
+            if (typeof u !== 'string' || !u) return u;
+            // Relative and protocol-relative URLs are relative to the game
+            // document on the upstream host, not to this shell. Resolve them
+            // first so they can be recognised as proxied URLs below.
+            if (u.charAt(0) !== '/' || u.charAt(1) === '/') {
+              if (!/^[a-z][a-z0-9+.-]*:/i.test(u) || u.charAt(0) === '/') {
+                try {
+                  u = new URL(u, 'https://' + gameOrigin + gamePath).href;
+                } catch (err) {
+                  return u;
+                }
+              }
+            }
+            var host = null;
+            var rest = null;
+            var m = u.match(/^https?:\/\/([^/]+)(\/[\s\S]*)?$/);
+            if (m) {
+              var h = m[1].toLowerCase();
+              if (h === WORKER_HOST) {
+                var pm = (m[2] || '/').match(/^\/lumin\/x\/([^/]+)(\/.*)?$/);
+                if (!pm) return u;
+                host = pm[1].toLowerCase();
+                rest = pm[2] || '/';
+              } else if (PROXIED.indexOf(h) !== -1) {
+                host = h;
+                rest = m[2] || '/';
+              } else {
+                return u;
+              }
+            } else if (u.charAt(0) === '/' && u.charAt(1) !== '/') {
+              var pm2 = u.match(/^\/lumin\/x\/([^/]+)(\/.*)?$/);
+              if (pm2) {
+                host = pm2[1].toLowerCase();
+                rest = pm2[2] || '/';
+              } else {
+                host = gameOrigin;
+                rest = u;
+              }
+            } else {
+              return u;
+            }
+            var nonce = '';
+            try {
+              nonce = new URL('https://x' + rest).searchParams.get('__lp') || '';
+            } catch (err) {
+              nonce = '';
+            }
+            return (
+              SHELL_BASE +
+              '?u=' +
+              hexOf(host + '\n' + rest) +
+              (nonce ? '&__lp=' + encodeURIComponent(nonce) : '')
+            );
+          }
+
+          window.__luminFrameUrl = toShell;
+          var proto = window.HTMLIFrameElement && window.HTMLIFrameElement.prototype;
+          if (!proto) return;
+          var desc = Object.getOwnPropertyDescriptor(proto, 'src');
+          if (desc && desc.get && desc.set) {
+            Object.defineProperty(proto, 'src', {
+              configurable: true,
+              enumerable: desc.enumerable,
+              get: desc.get,
+              set: function (value) {
+                return desc.set.call(this, toShell(value));
+              },
+            });
+          }
+          var origSetAttribute = proto.setAttribute;
+          proto.setAttribute = function (name, value) {
+            if (String(name).toLowerCase() === 'src') value = toShell(value);
+            return origSetAttribute.call(this, name, value);
+          };
+        }
+        window.__luminInstallFrameHook = installFrameHook;
+
+        function render(html, finalOrigin, finalPath) {
+          // The worker rewrites proxied URLs to root-relative /lumin/x/...
+          // paths. This document is same-origin with the hub, so those would
+          // resolve to the hub origin and 404. Make them absolute on the
+          // worker. (The worker's injected URL shim contains the same literal,
+          // so this also keeps its runtime rewrites on the worker.)
+          html = html.replace(/\/lumin\/x/g, WORKER + '/lumin/x');
+
+          // A <base> from upstream would override ours (and often points at
+          // the original filtered host).
+          html = html.replace(/<base\b[^>]*>/gi, '');
+
+          // Relative URLs (assets/app.js) resolve against the upstream
+          // document directory. Reproduce that with a base tag on the worker.
+          var dir = finalPath.replace(/[?#].*$/, '');
+          dir = dir.slice(0, dir.lastIndexOf('/') + 1) || '/';
+          var base = WORKER + '/lumin/x/' + finalOrigin + dir;
+          var baseTag = '<base href="' + base.replace(/"/g, '&quot;') + '">';
+          if (/<head(\s[^>]*)?>/i.test(html)) {
+            html = html.replace(/<head(\s[^>]*)?>/i, function (match) {
+              return match + baseTag;
+            });
+          } else {
+            html = baseTag + html;
+          }
+
+          // Install the nested-frame hook before the game document is parsed;
+          // the worker's own shim runs after it and wraps these setters.
+          try {
+            installFrameHook(finalOrigin, finalPath);
+          } catch (err) {
+            /* best-effort */
+          }
+
+          // The shell is same-origin with the hub, so the game runs as a real
+          // document (relative URLs work) without ever loading a workers.dev
+          // sub-frame, which school extensions block.
+          document.open();
+          document.write(html);
+          document.close();
+        }
+
+        var controller = typeof AbortController === 'function' ? new AbortController() : null;
+        var timer = controller
+          ? setTimeout(function () {
+              controller.abort();
+            }, 20000)
+          : null;
+
+        fetch(target, {
+          credentials: 'omit',
+          cache: 'no-store',
+          signal: controller ? controller.signal : undefined,
+        })
+          .then(function (res) {
+            if (timer) clearTimeout(timer);
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var type = (res.headers.get('content-type') || '').toLowerCase();
+            if (
+              type &&
+              type.indexOf('text/html') === -1 &&
+              type.indexOf('application/xhtml') === -1
+            ) {
+              throw new Error('Unexpected content type: ' + type);
+            }
+            // After upstream redirects the worker's final URL tells us where
+            // the document actually came from; use it for relative assets.
+            var finalOrigin = origin;
+            var finalPath = path;
+            try {
+              var u = new URL(res.url);
+              var m = u.pathname.match(/^\/lumin\/x\/([^/]+)(\/.*)?$/);
+              if (m) {
+                finalOrigin = m[1].toLowerCase();
+                finalPath = m[2] || '/';
+              }
+            } catch (err) {
+              /* keep the requested target */
+            }
+            return res.text().then(function (html) {
+              if (!html || html.length < 32) {
+                throw new Error('Empty game document');
+              }
+              render(html, finalOrigin, finalPath);
+            });
+          })
+          .catch(function (err) {
+            if (timer) clearTimeout(timer);
+            var detail = err && err.name === 'AbortError' ? 'timed out' : 'could not load';
+            fail(
+              'This game ' +
+                detail +
+                '. The school network may be blocking it. Try again in a moment.'
+            );
+          });
+      })();
+    </script>
+  </body>
+</html>

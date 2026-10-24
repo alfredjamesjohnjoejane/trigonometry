@@ -2,11 +2,27 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   isLuminBootUrl,
   isLuminProbeUrl,
+  toLuminDocumentUrl,
   toWorkerBootUrl,
   installLuminBootProxy,
   _uninstallLuminBootProxy,
 } from './index.js';
 import { LUMIN_WORKER_BOOT_URL } from '../types/index.js';
+
+function hex(text: string): string {
+  return Array.from(new TextEncoder().encode(text))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/** The same-origin shell URL the page should use for a game document. */
+function shellUrl(host: string, pathAndSearch: string): string {
+  const u = new URL(pathAndSearch, 'https://x');
+  const nonce = u.searchParams.get('__lp');
+  return `http://localhost:3000/p.html?u=${hex(`${host}\n${pathAndSearch}`)}${
+    nonce ? `&__lp=${encodeURIComponent(nonce)}` : ''
+  }`;
+}
 
 beforeEach(() => {
   _uninstallLuminBootProxy();
@@ -52,6 +68,33 @@ describe('isLuminProbeUrl', () => {
     expect(isLuminProbeUrl('https://a.luminsdk.com/api/v1/boot?t=1')).toBe(false);
     expect(isLuminProbeUrl('https://example.com/g/_iframe_probe')).toBe(false);
     expect(isLuminProbeUrl('')).toBe(false);
+  });
+});
+
+describe('toLuminDocumentUrl', () => {
+  it('puts game documents on the hub origin behind an opaque token', () => {
+    const url = toLuminDocumentUrl('https://a.luminsdk.com/g/abc/selenite/game/?__lp=n1');
+    expect(url).toBe(shellUrl('a.luminsdk.com', '/g/abc/selenite/game/?__lp=n1'));
+    expect(url).not.toContain('workers.dev');
+    expect(url).not.toContain('game');
+    expect(url).not.toContain('proxy');
+    expect(url).not.toContain('unblock');
+  });
+
+  it('covers every Lumin game host', () => {
+    for (const host of ['drkesten.com', 'milpagan.org', 'catholicrebuttals.com']) {
+      expect(toLuminDocumentUrl(`https://${host}/g/session/tile/`)).toBe(
+        shellUrl(host, '/g/session/tile/')
+      );
+    }
+  });
+
+  it('leaves non-document Lumin URLs and other hosts alone', () => {
+    expect(toLuminDocumentUrl('https://a.luminsdk.com/api/v1/icon/session/selenite/game')).toBe(
+      null
+    );
+    expect(toLuminDocumentUrl('https://example.com/g/abc/game/')).toBe(null);
+    expect(toLuminDocumentUrl('')).toBe(null);
   });
 });
 
@@ -194,14 +237,17 @@ describe('installLuminHandshakeShim', () => {
 });
 
 describe('installLuminUrlRewrite', () => {
-  it('loads Lumin game frames through the proxy', () => {
+  it('loads Lumin game frames through the same-origin shell', () => {
     installLuminBootProxy();
     const frame = document.createElement('iframe');
     frame.src = 'https://a.luminsdk.com/g/abc/selenite/game/?__lp=n1';
     document.body.appendChild(frame);
-    expect(frame.src).toBe(
-      'https://url-marketplace.jesherhaed.workers.dev/lumin/x/a.luminsdk.com/g/abc/selenite/game/?__lp=n1'
-    );
+    expect(frame.src).toBe(shellUrl('a.luminsdk.com', '/g/abc/selenite/game/?__lp=n1'));
+    // The whole point: no workers.dev sub-frame and no blocked keywords in
+    // the URL the school extension sees.
+    expect(frame.src).not.toContain('workers.dev');
+    expect(frame.src).not.toContain('game');
+    expect(frame.src).not.toContain('proxy');
   });
 
   it('loads Lumin thumbnails through the proxy', () => {
@@ -242,6 +288,30 @@ describe('installLuminUrlRewrite', () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.origin).toBe('https://a.luminsdk.com');
     expect((seen[0]?.data as { game?: string }).game).toBe('selenite/game');
+  });
+
+  it('re-stamps messages from a same-origin shell frame with the Lumin origin', () => {
+    installLuminBootProxy();
+    const frame = document.createElement('iframe');
+    frame.src = 'https://a.luminsdk.com/g/abc/selenite/game/?__lp=n3';
+    document.body.appendChild(frame);
+    const seen: MessageEvent[] = [];
+    const listener = (e: Event): void => {
+      seen.push(e as MessageEvent);
+    };
+    window.addEventListener('message', listener);
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        data: { __lumin: 'frame-ok', game: 'selenite/game', nonce: 'n3' },
+        // The shell is same-origin with the hub, so the browser reports the
+        // hub origin (not the worker origin).
+        origin: window.location.origin,
+        source: frame.contentWindow,
+      })
+    );
+    window.removeEventListener('message', listener);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.origin).toBe('https://a.luminsdk.com');
   });
 
   it('leaves messages from other origins untouched', () => {
