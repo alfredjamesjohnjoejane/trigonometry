@@ -426,6 +426,28 @@ export function installLuminUrlRewrite(): boolean {
       } as typeof proto.setAttribute;
     }
 
+    // Grid thumbnails and in-page Lumin images load from a.luminsdk.com, which
+    // a school filter may block even though the worker is reachable. Route
+    // those images through the proxy too; other hosts are left untouched.
+    const imgProto = window.HTMLImageElement?.prototype;
+    if (imgProto) {
+      const imgDesc = Object.getOwnPropertyDescriptor(imgProto, 'src');
+      if (imgDesc?.get && imgDesc?.set) {
+        const imgSet = imgDesc.set;
+        Object.defineProperty(imgProto, 'src', {
+          configurable: true,
+          enumerable: imgDesc.enumerable,
+          get(this: HTMLImageElement): string {
+            return imgDesc.get!.call(this);
+          },
+          set(this: HTMLImageElement, value: string) {
+            const rewritten = toProxyUrl(String(value));
+            imgSet.call(this, rewritten ?? value);
+          },
+        });
+      }
+    }
+
     // location.href = ... and location.assign/replace.
     const locProto = Location.prototype;
     const hrefDesc = Object.getOwnPropertyDescriptor(locProto, 'href');

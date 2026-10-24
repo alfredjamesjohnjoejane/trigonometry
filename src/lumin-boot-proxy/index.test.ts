@@ -204,6 +204,22 @@ describe('installLuminUrlRewrite', () => {
     );
   });
 
+  it('loads Lumin thumbnails through the proxy', () => {
+    installLuminBootProxy();
+    const img = document.createElement('img');
+    img.src = 'https://a.luminsdk.com/api/v1/icon/session/selenite/game';
+    expect(img.src).toBe(
+      'https://url-marketplace.jesherhaed.workers.dev/lumin/x/a.luminsdk.com/api/v1/icon/session/selenite/game'
+    );
+  });
+
+  it('leaves non-Lumin images alone', () => {
+    installLuminBootProxy();
+    const img = document.createElement('img');
+    img.src = 'https://example.com/icon.png';
+    expect(img.src).toBe('https://example.com/icon.png');
+  });
+
   it('re-stamps messages from a proxied frame with the Lumin origin', () => {
     installLuminBootProxy();
     const frame = document.createElement('iframe');
